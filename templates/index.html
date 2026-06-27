@@ -576,6 +576,29 @@
             animation: pulse-live 1.5s infinite;
         }
 
+        /* My Team Section */
+        .my-team-card {
+            background: var(--bg-card);
+            border: 1px solid var(--border-color);
+            border-radius: 16px;
+            padding: 1.25rem;
+        }
+
+        .my-team-select-row {
+            display: flex;
+            gap: 0.75rem;
+        }
+
+        .my-team-header {
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+        }
+
+        .my-team-header > div:nth-child(2) {
+            flex: 1;
+        }
+
         /* Leaderboard */
         .leaderboard-grid {
             display: grid;
@@ -963,6 +986,29 @@
                 <h3 style="margin-bottom: 1rem; font-weight: 700;">⚡ Next Match</h3>
                 <div id="next-match" class="match-card" style="border-color: var(--accent-gold);">
                     <p style="color: var(--text-secondary);">Loading...</p>
+                </div>
+            </div>
+
+        <!-- My Team Section -->
+        <div class="my-team-section" style="margin-top: 2rem;">
+            <h3 style="font-size: 1.1rem; font-weight: 700; margin-bottom: 1rem;">🎯 My Team</h3>
+            <div class="my-team-card">
+                <div class="my-team-select-row">
+                    <select id="team-select" style="background: var(--bg-card); color: var(--text-primary); border: 1px solid var(--border-color); border-radius: 10px; padding: 0.6rem 1rem; font-size: 0.95rem; flex: 1; cursor: pointer;">
+                        <option value="">Select a team to follow...</option>
+                    </select>
+                    <button id="follow-btn" onclick="toggleFollow()" style="background: var(--gradient-1); border: none; color: white; padding: 0.6rem 1.2rem; border-radius: 10px; font-weight: 600; cursor: pointer; font-size: 0.9rem;">+ Follow</button>
+                </div>
+                <div id="my-team-info" style="margin-top: 1rem; display: none;">
+                    <div class="my-team-header">
+                        <span id="my-team-flag" style="font-size: 2rem;"></span>
+                        <div>
+                            <div id="my-team-name" style="font-weight: 700; font-size: 1.1rem;"></div>
+                            <div id="my-team-detail" style="color: var(--text-secondary); font-size: 0.85rem;"></div>
+                        </div>
+                        <button onclick="toggleFollow()" style="background: rgba(239,68,68,0.15); color: var(--accent-red); border: 1px solid rgba(239,68,68,0.3); padding: 0.4rem 0.8rem; border-radius: 8px; cursor: pointer; font-size: 0.8rem;">✕ Unfollow</button>
+                    </div>
+                    <div id="my-team-matches" style="margin-top: 1rem;"></div>
                 </div>
             </div>
         </div>
@@ -1471,14 +1517,111 @@
             }
         }
 
+        // --- My Team Feature ---
+        const TEAM_FLAGS = {'Argentina':'🇦🇷','Brazil':'🇧🇷','France':'🇫🇷','Germany':'🇩🇪','Spain':'🇪🇸','England':'🏴󠁧󠁢󠁥󠁮󠁧󠁿','Italy':'🇮🇹','Netherlands':'🇳🇱','Portugal':'🇵🇹','Belgium':'🇧🇪','Croatia':'🇭🇷','Uruguay':'🇺🇾','Colombia':'🇨🇴','Mexico':'🇲🇽','USA':'🇺🇸','Canada':'🇨🇦','Costa Rica':'🇨🇷','Saudi Arabia':'🇸🇦','Japan':'🇯🇵','South Korea':'🇰🇷','Australia':'🇦🇺','Serbia':'🇷🇸','Cameroon':'🇨🇲','Ghana':'🇬🇭','Iran':'🇮🇷','Poland':'🇵🇱','Denmark':'🇩🇰','Switzerland':'🇨🇭','Sweden':'🇸🇪','Senegal':'🇸🇳','Morocco':'🇲🇦','Tunisia':'🇹🇳','Egypt':'🇪🇬','Nigeria':'🇳🇬','Chile':'🇨🇱','Peru':'🇵🇪','Ecuador':'🇪🇨','Wales':'🏴󠁧󠁢󠁷󠁬󠁳󠁿','Scotland':'🏴󠁧󠁢󠁳󠁣󠁴󠁿','Türkiye':'🇹🇷','Romania':'🇷🇴','Hungary':'🇭🇺','Norway':'🇳🇴','Cape Verde':'🇨🇻','New Zealand':'🇳🇿','Qatar':'🇶🇦','Panama':'🇵🇦','Iraq':'🇮🇶','South Africa':'🇿🇦','Paraguay':'🇵🇾','Haiti':'🇭🇹','Congo DR':'🇨🇩','Uzbekistan':'🇺🇿','Ivory Coast':'🇨🇮','Jordan':'🇯🇴','Algeria':'🇩🇿'};
+
+        function initTeamSelect() {
+            const select = document.getElementById('team-select');
+            const teams = Object.keys(TEAM_FLAGS).sort();
+            teams.forEach(team => {
+                const opt = document.createElement('option');
+                opt.value = team;
+                opt.textContent = `${TEAM_FLAGS[team]} ${team}`;
+                select.appendChild(opt);
+            });
+
+            // Load saved team
+            const saved = localStorage.getItem('fifa2026_myteam');
+            if (saved) {
+                select.value = saved;
+                showMyTeam(saved);
+            }
+        }
+
+        function toggleFollow() {
+            const select = document.getElementById('team-select');
+            const team = select.value;
+            if (!team) {
+                select.focus();
+                return;
+            }
+            localStorage.setItem('fifa2026_myteam', team);
+            showMyTeam(team);
+        }
+
+        function showMyTeam(team) {
+            const info = document.getElementById('my-team-info');
+            const flag = document.getElementById('my-team-flag');
+            const name = document.getElementById('my-team-name');
+            const detail = document.getElementById('my-team-detail');
+            const btn = document.getElementById('follow-btn');
+
+            flag.textContent = TEAM_FLAGS[team] || '⚽';
+            name.textContent = team;
+            detail.textContent = 'Tracking all matches';
+            info.style.display = 'block';
+            btn.textContent = '✓ Following';
+
+            // Load team matches
+            loadTeamMatches(team);
+        }
+
+        async function loadTeamMatches(team) {
+            const container = document.getElementById('my-team-matches');
+            try {
+                const scheduleRes = await fetch('/api/schedule');
+                const schedule = await scheduleRes.json();
+                const allMatches = [];
+                Object.keys(schedule).forEach(round => {
+                    schedule[round].forEach(m => {
+                        if (m.home === team || m.away === team) {
+                            allMatches.push({...m, round});
+                        }
+                    });
+                });
+                allMatches.sort((a, b) => a.date.localeCompare(b.date));
+
+                if (allMatches.length === 0) {
+                    container.innerHTML = '<p style="color: var(--text-secondary); font-size: 0.85rem;">No matches scheduled yet.</p>';
+                    return;
+                }
+
+                container.innerHTML = `
+                    <div style="font-size: 0.8rem; color: var(--text-secondary); margin-bottom: 0.5rem;">📋 ${allMatches.length} matches</div>
+                    ${allMatches.slice(0, 5).map(m => {
+                        const isHome = m.home === team;
+                        const opponent = isHome ? m.away : m.home;
+                        const scoreHtml = (m.home_score !== null && m.home_score !== undefined)
+                            ? `<span style="font-weight:700; color:${isHome && m.home_score > m.away_score ? 'var(--accent-green)' : !isHome && m.away_score > m.home_score ? 'var(--accent-green)' : 'var(--text-primary)'}">${m.home_score} : ${m.away_score}</span>`
+                            : '<span style="color:var(--accent-gold);">VS</span>';
+                        const dateObj = new Date(m.date + 'T00:00:00');
+                        const dateStr = dateObj.toLocaleDateString('en-US', { month:'short', day:'numeric' });
+                        const statusBadge = m.status && m.status !== 'null' ? `<span class="status-badge" style="font-size:0.65rem;">${m.status}</span>` : '';
+                        return `
+                            <div style="display:flex; align-items:center; justify-content:space-between; padding:0.5rem 0; border-bottom:1px solid var(--border-color);">
+                                <span style="font-size:0.8rem;">${dateStr}</span>
+                                <span style="font-size:0.85rem;">${isHome ? '🏠' : '✈️'} vs <strong>${opponent}</strong></span>
+                                <span style="font-size:0.8rem;">${scoreHtml} ${statusBadge}</span>
+                            </div>
+                        `;
+                    }).join('')}
+                `;
+            } catch (e) {
+                container.innerHTML = '<p style="color: var(--accent-red); font-size: 0.8rem;">Failed to load matches</p>';
+            }
+        }
+
         // Auto-refresh data every 5 minutes
         setInterval(() => {
             loadStandings();
             loadNextMatch();
+            const saved = localStorage.getItem('fifa2026_myteam');
+            if (saved) showMyTeam(saved);
         }, 300000);
 
         // Initial load
         loadNextMatch();
+        initTeamSelect();
     </script>
 </body>
 </html>

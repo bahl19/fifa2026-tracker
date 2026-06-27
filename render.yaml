@@ -3,8 +3,22 @@ services:
     name: fifa2026-tracker
     env: python
     buildCommand: "pip install -r requirements.txt"
-    startCommand: "gunicorn app:app --worker-class eventlet --workers 1 --bind 0.0.0.0:$PORT --timeout 120"
+    startCommand: "gunicorn app:app --workers 1 --bind 0.0.0.0:$PORT --timeout 120"
     plan: free
     envVars:
       - key: PYTHON_VERSION
         value: "3.11.7"
+
+  - type: worker
+    name: fifa2026-bot
+    env: python
+    buildCommand: "pip install -r requirements.txt"
+    startCommand: "python bot.py"
+    plan: free
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.11.7"
+      - key: TELEGRAM_BOT_TOKEN
+        value: ""
+      - key: LOCAL_API_URL
+        value: "https://fifa2026-tracker.onrender.com"
