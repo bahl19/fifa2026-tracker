@@ -1012,6 +1012,7 @@
                 </div>
             </div>
         </div>
+        </div>
 
         <!-- Standings Section -->
         <div id="standings" class="section">
@@ -1496,9 +1497,22 @@
             try {
                 const response = await fetch('/api/schedule');
                 const data = await response.json();
-                const round64 = data.group_stage || data.round_of_64 || data.round_of_32;
-                if (round64 && round64.length > 0) {
-                    const next = round64[0];
+                const gs = data.group_stage || data.round_of_64 || [];
+                const today = new Date().toISOString().slice(0, 10);
+                // Find the first match that hasn't been completed yet
+                let next = null;
+                for (let i = 0; i < gs.length; i++) {
+                    const m = gs[i];
+                    if (m.date >= today && !m.status.includes('FT') && !m.status.includes('Final')) {
+                        next = m;
+                        break;
+                    }
+                }
+                // If no upcoming matches, show the last completed one
+                if (!next && gs.length > 0) {
+                    next = gs[gs.length - 1];
+                }
+                if (next) {
                     container.innerHTML = `
                         <div class="match-info">
                             <span class="match-number">M${next.match}</span>
@@ -1511,9 +1525,11 @@
                         </div>
                         <div class="match-venue">🏟️ ${next.venue}</div>
                     `;
+                } else {
+                    container.innerHTML = '<p style="color: var(--text-secondary);">No matches scheduled.</p>';
                 }
             } catch (e) {
-                // silent fail
+                container.innerHTML = '<p style="color: var(--accent-red);">Failed to load next match.</p>';
             }
         }
 
