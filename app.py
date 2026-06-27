@@ -2,12 +2,14 @@ from flask import Flask, render_template, jsonify, request
 from markupsafe import escape
 import threading
 import time
+import os
+import logging
 from scraper import (
     scrape_fifa2026_data, get_match_schedule, get_world_ranking,
     get_top_scorers, get_upcoming_matches
 )
-import json
-import os
+
+logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
 app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'fifa2026-secret-key')
@@ -191,7 +193,8 @@ def api_status():
         'status': 'online',
         'last_updated': cached_data['last_updated'],
         'next_match': '2026-06-11 - Mexico vs TBD',
-        'venue': 'Estadio Azteca, Mexico City'
+        'venue': 'Estadio Azteca, Mexico City',
+        'telegram_configured': bool(TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID)
     })
 
 
@@ -270,6 +273,166 @@ def generate_chat_response(message):
     # Default response
     return "🤔 I'm not sure about that. Try asking me about:\n• A team (e.g., 'Brazil', 'France')\n• A player (e.g., 'Messi', 'Mbappe')\n• Match schedule\n• Standings\n• Rankings\n• Top scorers\n• The final\n\nType 'help' for more options!"
 
+
+# --- Telegram Bot Integration ---
+TELEGRAM_BOT_TOKEN = os.environ.get('TELEGRAM_BOT_TOKEN', '')
+TELEGRAM_CHAT_ID = os.environ.get('TELEGRAM_CHAT_ID', '')
+
+bot_last_states = {}  # Track match states for goal detection
+
+
+def send_telegram_msg(text):
+    """Send message via Telegram bot API"""
+    if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
+        return False
+    import requests as req
+    url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
+    try:
+        r = req.post(url, json={
+            'chat_id': TELEGRAM_CHAT_ID,
+            'text': text,
+            'parse_mode': 'MarkdownV2',
+            'disable_web_page_preview': True
+        }, timeout=15)
+        return r.status_code == 200
+    except Exception as e:
+        print(f"Telegram send error: {e}")
+        return False
+
+
+def check_and_send_match_alerts():
+    """Background thread: check match updates and send Telegram alerts"""
+    global bot_last_states
+    
+    while True:
+        try:
+            time.sleep(60)  # Check every minute
+            
+            matches = get_active_matches()
+            today_matches = get_today_matches()
+            all_matches = matches + today_matches
+            
+            for match in all_matches:
+                mid = str(match.get('match', ''))
+                if not mid:
+                    continue
+                
+                home_score = match.get('home_score', 0) or 0
+                away_score = match.get('away_score', 0) or 0
+                
+                prev = bot_last_states.get(mid, {})
+                prev_home = prev.get('home_score', -1)
+                prev_away = prev.get('away_score', -1)
+                
+                # Detect goals (skip first time seeing a match)
+                if prev_home >= 0:
+                    if home_score > prev_home:
+                        send_goal_alert(match, match.get('home', 'Unknown'), 'home')
+                    if away_score > prev_away:
+                        send_goal_alert(match, match.get('away', 'Unknown'), 'away')
+                
+                # Detect match end
+                if prev.get('status', '') not in ('Final', 'FT') and match.get('status') in ('Final', 'FT'):
+                    send_final_alert(match)
+                
+                bot_last_states[mid] = {
+                    'home_score': home_score,
+                    'away_score': away_score,
+                    'status': match.get('status', '')
+                }
+            
+        except Exception as e:
+            print(f"Match alert check error: {e}")
+            time.sleep(10)
+
+
+def send_goal_alert(match, scoring_team, side):
+    """Send goal alert to Telegram"""
+    home = match.get('home', '?')
+    away = match.get('away', '?')
+    home_s = match.get('home_score', 0) or 0
+    away_s = match.get('away_score', 0) or 0
+    group = match.get('group', '')
+    venue = match.get('venue', '')
+    
+    text = (
+        f"⚽🚨 *GOOOAL\\!* 🚨⚽\\n\\n"
+        f"{home} *{home_s}* \\- *{away_s}* {away}\\n"
+        f"🎯 *Scorer:* {scoring_team}\\n"
+        f"📍 {group}"
+    )
+    if venue:
+        text += f" \\| 🏟 {venue}"
+    
+    send_telegram_msg(text)
+
+
+def send_final_alert(match):
+    """Send match end alert to Telegram"""
+    home = match.get('home', '?')
+    away = match.get('away', '?')
+    home_s = match.get('home_score', 0) or 0
+    away_s = match.get('away_score', 0) or 0
+    group = match.get('group', '')
+    
+    # Determine winner
+    if home_s > away_s:
+        result = f"🏆 {home} wins\\!"
+    elif away_s > home_s:
+        result = f"🏆 {away} wins\\!"
+    else:
+        result = "🤝 Draw"
+    
+    text = (
+        f"🏁 *FULL TIME* 🏁\\n\\n"
+        f"{home} *{home_s}* \\- *{away_s}* {away}\\n"
+        f"{result}\\n"
+        f"📍 {group}"
+    )
+    
+    send_telegram_msg(text)
+
+
+def get_active_matches():
+    """Get live matches"""
+    data = get_api_data_safe('/api/standings')
+    if not data:
+        return []
+    return data.get('live_matches', [])
+
+
+def get_today_matches():
+    """Get today's matches"""
+    data = get_api_data_safe('/api/standings')
+    if not data:
+        return []
+    today = data.get('today', '')
+    upcoming = data.get('upcoming_matches', [])
+    return [m for m in upcoming if m.get('date') == today]
+
+
+def get_api_data_safe(endpoint):
+    """Safe API call to self (for background thread)"""
+    import requests as req
+    try:
+        port = os.environ.get('PORT', '5000')
+        url = f"http://127.0.0.1:{port}{endpoint}"
+        r = req.get(url, timeout=10)
+        if r.status_code == 200:
+            return r.json()
+    except:
+        pass
+    # Fallback: use cached data
+    if endpoint == '/api/standings':
+        return cached_data.get('standings', {})
+    return None
+
+
+# Start Telegram monitoring thread (only if token is set)
+if TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID:
+    alert_thread = threading.Thread(target=check_and_send_match_alerts, daemon=True)
+    alert_thread.start()
+    print(f"Telegram alerts enabled for chat: {TELEGRAM_CHAT_ID}")
 
 # Initialize data on first request
 update_data()
