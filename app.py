@@ -209,69 +209,230 @@ def chat_bot():
 
 
 def generate_chat_response(message):
-    """Generate a response based on user message"""
+    """Generate a response based on user message — uses live API data"""
     
     # Greeting
     if any(word in message for word in ['hello', 'hi', 'hey', 'hola', 'sup']):
-        return "👋 Hey there! I'm your FIFA 2026 World Cup assistant. Ask me about teams, players, standings, match schedules, or rankings!"
+        return "👋 Hey there! I'm your FIFA 2026 World Cup assistant. Ask me about teams, players, standings, match schedules, rankings, or top scorers!"
     
     # Help
     if 'help' in message or 'what can you do' in message:
-        return "🤖 I can help you with:\n• Team information (e.g., 'Tell me about Brazil')\n• Player stats (e.g., 'Messi stats')\n• Match schedules (e.g., 'When is the next match?')\n• Standings (e.g., 'Group A standings')\n• Rankings (e.g., 'Top 10 rankings')\n• Top scorers (e.g., 'Who is the top scorer?')\n\nJust ask naturally!"
+        return "🤖 I can help you with:\n• Team info (e.g., 'Tell me about Brazil')\n• Player stats (e.g., 'Messi stats')\n• Match schedule (e.g., 'next match', 'when does France play')\n• Standings (e.g., 'Group A standings', 'who is leading')\n• Rankings (e.g., 'Top 10 rankings')\n• Top scorers (e.g., 'Who is the top scorer?')\n• Live matches, results, venues\n\nJust ask naturally — I use LIVE tournament data!"
     
-    # Search for team names
+    # Live matches / today
+    if any(word in message for word in ['live', 'now', 'today', 'playing', 'ongoing']):
+        upcoming = get_upcoming_matches(limit=5)
+        live = upcoming.get('live', [])
+        today = upcoming.get('today', '')
+        today_matches = upcoming.get('upcoming', [])
+        today_matches = [m for m in today_matches if m.get('date') == today]
+        
+        if live:
+            msg = "🔴 **LIVE NOW**\n\n"
+            for m in live:
+                status = m.get('status', 'LIVE')
+                score = f"{m.get('home_score', 0)} : {m.get('away_score', 0)}" if m.get('home_score') is not None else "VS"
+                msg += f"⚽ {m['home']} **{score}** {m['away']}\n   🏟 {m.get('venue', '')} \\| {status}\n\n"
+            return msg
+        elif today_matches:
+            msg = f"🗓 **Today's Matches ({today})**\n\n"
+            for m in today_matches:
+                is_live = '🔴 LIVE' if 'LIVE' in str(m.get('status', '')) else m.get('status', 'Scheduled')
+                score = f"{m.get('home_score')} : {m.get('away_score')}" if m.get('home_score') is not None else "VS"
+                msg += f"⚽ {m['home']} **{score}** {m['away']}\n   🏟 {m.get('venue', '')} \\| {is_live}\n\n"
+            return msg
+        else:
+            # Show next upcoming
+            msgs = [m for m in today_matches if m.get('date', '') > today] if today_matches else []
+            if not msgs:
+                all_upcoming = upcoming.get('upcoming', [])
+                msgs = all_upcoming[:3]
+            if msgs:
+                msg = "⏰ **Next Matches**\n\n"
+                for m in msgs[:3]:
+                    date_str = m['date']
+                    msg += f"📅 {date_str}: {m['home']} vs {m['away']} 🏟 {m.get('venue', 'TBD')}\n"
+                return msg
+            return "✅ No live or upcoming matches right now. Check the schedule tab for full fixtures."
+    
+    # Standings / Group tables
+    if any(word in message for word in ['standings', 'table', 'who is leading', 'leader', 'points']):
+        standings_data = cached_data.get('standings')
+        groups = standings_data.get('standings', standings_data.get('groups', {})) if standings_data else {}
+        
+        # Check for specific group
+        group_match = None
+        for g in groups:
+            if g.lower().replace('group ', '') in message.lower().replace('group ', ''):
+                group_match = g
+                break
+        
+        if group_match:
+            teams = groups[group_match]
+            msg = f"📊 **Group {group_match} Standings**\n\n"
+            for t in teams:
+                msg += f"{t['pos']}. {t['team']} — {t['pts']}pts ({t['pld']}P {t['w']}W {t['d']}D {t['l']}L, GD:{t['gd']})\n"
+            return msg
+        
+        # Show all group leaders if no specific group asked
+        msg = "📊 **Group Standings — After Matchday 2**\n\n"
+        for g in sorted(groups.keys()):
+            teams = groups[g]
+            if teams:
+                leader = teams[0]
+                msg += f"**Group {g}**: 1️⃣ {leader['team']} ({leader['pts']}pts)"
+                if len(teams) > 1:
+                    msg += f" | 2️⃣ {teams[1]['team']} ({teams[1]['pts']}pts)"
+                msg += "\n"
+        msg += "\nAsk 'Group A standings' for full table details!"
+        return msg
+    
+    # Next match / schedule
+    if any(word in message for word in ['schedule', 'next match', 'when', 'next', 'fixture', 'upcoming']):
+        schedule = get_match_schedule()
+        upcoming_data = get_upcoming_matches(limit=3)
+        today = upcoming_data.get('today', '')
+        next_matches = upcoming_data.get('upcoming', [])[:3]
+        
+        if next_matches:
+            msg = "📅 **Next Upcoming Matches**\n\n"
+            for m in next_matches:
+                date_str = m['date']
+                group = m.get('group', '')
+                venue = m.get('venue', 'TBD')
+                msg += f"📆 {date_str}: **{m['home']}** vs **{m['away']}**\n"
+                msg += f"   🏟 {venue} | {group}\n\n"
+            
+            # Also show today if there are today's matches
+            today_m = [x for x in next_matches if x.get('date') == today]
+            if today_m:
+                msg += f"⏰ **Today's matches** — recommend checking the Live tab for real-time scores!"
+            return msg
+        return "📅 No more upcoming matches scheduled. The tournament may be in knockout stage!"
+    
+    # Tournament progress
+    if any(word in message for word in ['progress', 'how many matches', 'completed', 'results']):
+        standings_data = cached_data.get('standings')
+        groups = standings_data.get('standings', standings_data.get('groups', {})) if standings_data else {}
+        schedule = get_match_schedule()
+        
+        total_played = 0
+        total_games = 0
+        for g, teams in groups.items():
+            for t in teams:
+                total_played += t.get('pld', 0)
+            total_games += len(teams) * 6  # 6 matches per group (double round robin 3 opponents x 2)
+        
+        gs_matches = len(schedule.get('group_stage', []))
+        r32 = len(schedule.get('round_of_32', []))
+        r16 = len(schedule.get('round_of_16', []))
+        qf = len(schedule.get('quarter_finals', []))
+        
+        msg = "📊 **Tournament Progress**\n\n"
+        msg += f"• Group Stage: {gs_matches} matches scheduled\n"
+        if r32: msg += f"• Round of 32: {r32} matches\n"
+        if r16: msg += f"• Round of 16: {r16} matches\n"
+        if qf: msg += f"• Quarter Finals: {qf} matches\n"
+        msg += f"• **104 total matches** across the tournament\n"
+        return msg
+    
+    # Rankings
+    if any(word in message for word in ['ranking', 'top teams', 'best teams', 'fifa ranking']):
+        rankings = get_world_ranking()
+        msg = "🏆 **FIFA World Rankings**\n\n"
+        for r in rankings:
+            trend_icon = '📈' if r.get('trend') == 'up' else '📉' if r.get('trend') == 'down' else '➡️'
+            msg += f"{r['rank']}. **{r['team']}** — {r['points']} pts {trend_icon}\n"
+        return msg
+    
+    # Top scorers
+    if any(word in message for word in ['scorer', 'top scorer', 'goals', 'who is top', 'golden boot', 'striker']):
+        scorers = get_top_scorers()
+        if not scorers:
+            return "🥅 Top scorers data is loading... Try again in a minute!"
+        msg = "🥅 **Top Scorers — Live**\n\n"
+        for s in scorers[:10]:
+            msg += f"{s['rank']}. **{s['player']}** ({s['team']}) — **{s['goals']} goals**\n"
+            if 'assists' in s:
+                msg += f"   🅰️ {s['assists']} assists\n"
+        return msg
+    
+    # Final venue
+    if any(word in message for word in ['final', 'where is final', 'venue']):
+        return "🏟️ **2026 World Cup Final**\n\n📅 Date: August 3, 2026\n📍 Venue: **MetLife Stadium**, New York/New Jersey\n🏟️ Capacity: 82,500\n\nThis will be the first World Cup Final ever held in the United States!"
+    
+    # Host info
+    if 'host' in message:
+        return "🌎 **FIFA 2026 Host Countries**\n\nFor the first time ever, the World Cup is hosted by THREE nations:\n\n• 🇺🇸 **United States** — 11 host cities (NY/LA/Miami/SF/Seattle/Dallas/Houston/Atlanta/Philadelphia/Boston/KC)\n• 🇲🇽 **Mexico** — 3 host cities (Mexico City/Guadalajara/Monterrey)\n• 🇨🇦 **Canada** — 2 host cities (Toronto/Vancouver)\n\nAlso the first World Cup with 48 teams! 🎉"
+    
+    # Search for team names — enhanced with live context
     for team_name, info in TEAM_INFO.items():
         if team_name.lower() in message:
             flag = info.get('flag', '')
-            return (
+            response = (
                 f"{flag} **{team_name}**\n\n"
                 f"🏆 World Cups Won: {info['world_cups_won']}\n"
                 f"📊 FIFA Ranking: #{info['ranking']}\n"
                 f"👨‍💼 Manager: {info['manager']}\n"
-                f"🌍 Confederation: {info['confederation']}\n\n"
-                f"Hosting the 2026 World Cup across USA, Canada, and Mexico!"
+                f"🌍 Confederation: {info['confederation']}\n"
             )
+            
+            # Add live standings info for this team if available
+            standings_data = cached_data.get('standings')
+            groups = standings_data.get('standings', standings_data.get('groups', {})) if standings_data else {}
+            for g, teams in groups.items():
+                for t in teams:
+                    if team_name.lower() in t['team'].lower() or t['team'].lower() in team_name.lower():
+                        response += f"\n📊 Currently in **Group {g}**: {t['pos']}nd place, {t['pts']}pts ({t['w']}W {t['d']}D {t['l']}L)"
+                        break
+            
+            response += f"\n\n🇺🇸🇲🇽🇨🇦 Hosting the 2026 World Cup!"
+            return response
     
-    # Search for player names
+    # Search for player names — enhanced with live goals
     for key, player in PLAYER_DB.items():
-        if len(message.split()) >= 1:
-            words = message.split()
-            for word in words:
-                if len(word) > 3 and word in key:
-                    return (
-                        f"⚽ **{key.title()}** ({player['team']})\n\n"
-                        f"📍 Position: {player['position']}\n"
-                        f"🎂 Age: {player['age']}\n"
-                        f"🏆 World Cups: {player['world_cups']}\n"
-                        f"🥅 Goals: {player['goals']}\n"
-                        f"🅰️ Assists: {player['assists']}\n\n"
-                        f"📝 {player['bio']}"
-                    )
+        words = message.split()
+        for word in words:
+            if len(word) > 3 and (word in key or key.replace(' ', '').startswith(word)):
+                # Get live scorers data for updated info
+                scorers = get_top_scorers()
+                live_goals = player['goals']
+                live_assists = player.get('assists', 0)
+                for s in scorers:
+                    if key.replace(' ', '') in s['player'].lower().replace(' ', ''):
+                        live_goals = s.get('goals', live_goals)
+                        live_assists = s.get('assists', live_assists)
+                        break
+                
+                return (
+                    f"⚽ **{key.title()}** ({player['team']})\n\n"
+                    f"📍 Position: {player['position']}\n"
+                    f"🎂 Age: {player['age']}\n"
+                    f"🏆 World Cups: {player['world_cups']}\n"
+                    f"🥅 Goals (live): {live_goals}\n"
+                    f"🅰️ Assists (live): {live_assists}\n\n"
+                    f"📝 {player['bio']}"
+                )
     
-    # Specific queries
-    if any(word in message for word in ['schedule', 'next match', 'when']):
-        return "📅 **FIFA 2026 Schedule**\n\nThe tournament kicks off on **June 11, 2026** at the iconic **Estadio Azteca** in Mexico City!\n\n• Group Stage: June 11-30\n• Round of 32: July 1-5\n• Round of 16: July 9-13\n• Quarter Finals: July 17-19\n• Semi Finals: July 25-27\n• Third Place: August 1\n• **FINAL: August 3, 2026 at MetLife Stadium (New Jersey)**\n\nUse the Schedule tab to see all matches!"
+    # Group specific queries
+    if 'group' in message:
+        standings_data = cached_data.get('standings')
+        groups = standings_data.get('standings', standings_data.get('groups', {})) if standings_data else {}
+        msg = "📊 **Quick Group Overview**\n\n"
+        for g in sorted(groups.keys()):
+            teams = groups[g]
+            if teams:
+                leader = teams[0]
+                msg += f"**Group {g}**: 1. {leader['team']} ({leader['pts']}pts) | 2. {teams[1]['team']} ({teams[1].get('pts', 0)}pts)\n"
+        msg += "\nTry 'Group C standings' for full table!"
+        return msg
     
-    if any(word in message for word in ['standings', 'table', 'who is leading']):
-        return "📊 **Current Standings**\n\nThe tournament hasn't started yet! Group standings will appear here once matches begin. Check the Standings tab for the full group tables!"
-    
-    if any(word in message for word in ['ranking', 'top teams', 'best teams']):
-        return "🏆 **FIFA World Rankings (Top 5)**\n\n1. 🇦🇷 Argentina - 1867 pts\n2. 🇫🇷 France - 1863 pts\n3. 🇪🇸 Spain - 1816 pts\n4. 🏴󠁧󠁢󠁥󠁮󠁧󠁿 England - 1810 pts\n5. 🇧🇷 Brazil - 1776 pts\n\nSee the Leaderboard tab for the full ranking!"
-    
-    if any(word in message for word in ['scorer', 'top scorer', 'goals', 'who is top']):
-        return "🥅 **Top Scorers All Time (WC Qualifiers + Finals)**\n\n1. 🇦🇷 Lionel Messi - 13 goals\n2. 🇵🇹 Cristiano Ronaldo - 11 goals\n3. 🇫🇷 Kylian Mbappé - 10 goals\n4. 🇵🇱 Robert Lewandowski - 9 goals\n5. 🏴󠁧󠁢󠁥󠁮󠁧󠁿 Harry Kane - 8 goals\n\nMore stats in the Leaderboard tab!"
-    
-    if any(word in message for word in ['final', 'where is final', 'venue']):
-        return "🏟️ **2026 World Cup Final**\n\n📅 Date: August 3, 2026\n📍 Venue: **MetLife Stadium**, New York/New Jersey\n🏟️ Capacity: 82,500\n\nThis will be the first World Cup Final ever held in the United States!"
-    
-    if 'winner' in message or 'who will win' in message:
-        return "🔮 **Prediction?**\n\nIt's too early to tell! But the favorites are:\n• 🇦🇷 Argentina (defending champions)\n• 🇫🇷 France (2018 winners)\n• 🏴󠁧󠁢󠁥󠁮󠁧󠁿 England (strong young squad)\n• 🇪🇸 Spain (Euro 2024 winners)\n• 🇧🇷 Brazil (5-time champions)\n\nWho are YOU rooting for? 🤔"
-    
-    if 'host' in message or 'where' in message:
-        return "🌎 **FIFA 2026 Host Countries**\n\nFor the first time ever, the World Cup is hosted by THREE nations:\n\n• 🇺🇸 **United States** - 11 host cities (NY/LA/Miami/SF/Seattle/Dallas/Houston/Atlanta/Philadelphia/Boston/KC)\n• 🇲🇽 **Mexico** - 3 host cities (Mexico City/Guadalajara/Monterrey)\n• 🇨🇦 **Canada** - 2 host cities (Toronto/Vancouver)\n\nAlso the first World Cup with 48 teams! 🎉"
+    # Tournament info
+    if any(word in message for word in ['tournament', 'world cup', 'fifa', 'when does']):
+        return "🏆 **FIFA World Cup 2026**\n\n• 🇺🇸🇲🇽🇨🇦 Host: USA, Mexico, Canada\n• 📅 Dates: June 11 — August 3, 2026\n• 👥 48 teams (first expanded format!)\n• ⚽ 104 matches\n• 🏙️ 16 host cities across 3 nations\n\nThis is the biggest World Cup ever! Ask me about any team, player, or match."
     
     # Default response
-    return "🤔 I'm not sure about that. Try asking me about:\n• A team (e.g., 'Brazil', 'France')\n• A player (e.g., 'Messi', 'Mbappe')\n• Match schedule\n• Standings\n• Rankings\n• Top scorers\n• The final\n\nType 'help' for more options!"
+    return "🤔 I'm not sure about that. Try asking me about:\n• A team (e.g., 'Brazil', 'France', 'Argentina')\n• A player (e.g., 'Messi', 'Mbappe', 'Haaland')\n• Live matches (e.g., 'who is playing now')\n• Match schedule (e.g., 'next match')\n• Standings (e.g., 'Group A standings', 'who is leading')\n• Rankings (e.g., 'top 10 rankings')\n• Top scorers / goals\n• Tournament info (e.g., 'how many matches')\n\nType 'help' for all options!"
 
 
 # --- Telegram Bot Integration ---
