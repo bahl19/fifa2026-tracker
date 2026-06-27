@@ -176,9 +176,46 @@ def parse_matches_from_events(events_data):
         venue_city = venue.get('address', {}).get('city', '')
         venue_country = venue.get('address', {}).get('country', '')
         
+        # Parse full datetime and convert to IST + US timezones
+        from datetime import timedelta
+        raw_dt = event['date']  # e.g. "2026-06-11T19:30:00Z"
+        try:
+            # Parse ISO datetime with Z suffix
+            dt_utc = datetime.strptime(raw_dt.replace('Z', '+0000'), '%Y-%m-%dT%H:%M:%S%z')
+        except:
+            try:
+                dt_utc = datetime.fromisoformat(raw_dt.replace('Z', '+00:00'))
+            except:
+                dt_utc = datetime.now(timezone.utc)
+
+        # IST = UTC+5:30
+        ist_offset = timedelta(hours=5, minutes=30)
+        dt_ist = dt_utc.astimezone(timezone(ist_offset))
+        ist_str = dt_ist.strftime('%I:%M %p IST')
+
+        # US Eastern = UTC-4 (EDT in summer)
+        us_eastern = timezone(timedelta(hours=-4))
+        dt_et = dt_utc.astimezone(us_eastern)
+        et_str = dt_et.strftime('%I:%M %p ET')
+
+        # US Central = UTC-5 (CDT in summer)
+        us_central = timezone(timedelta(hours=-5))
+        dt_ct = dt_utc.astimezone(us_central)
+        ct_str = dt_ct.strftime('%I:%M %p CT')
+
+        # US Pacific = UTC-7 (PDT in summer)
+        us_pacific = timezone(timedelta(hours=-7))
+        dt_pt = dt_utc.astimezone(us_pacific)
+        pt_str = dt_pt.strftime('%I:%M %p PT')
+
         match_data = {
             'match': event['id'],
             'date': event['date'][:10],
+            'time_utc': dt_utc.strftime('%H:%M UTC'),
+            'time_ist': ist_str,
+            'time_et': et_str,
+            'time_ct': ct_str,
+            'time_pt': pt_str,
             'home': home['team'],
             'away': away['team'],
             'home_score': home['score'] if is_completed else None,

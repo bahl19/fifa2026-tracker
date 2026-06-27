@@ -410,6 +410,21 @@
             font-weight: 600;
         }
 
+        .match-time {
+            font-size: 0.8rem;
+            color: var(--accent-gold);
+            margin-top: 0.4rem;
+            display: flex;
+            align-items: center;
+            gap: 0.3rem;
+        }
+        .match-time-card {
+            font-size: 0.75rem;
+            color: var(--accent-gold);
+            padding: 0.3rem 0.5rem;
+            text-align: center;
+            border-top: 1px solid var(--border-color);
+        }
         .match-date {
             font-size: 0.8rem;
             color: var(--text-secondary);
@@ -1197,6 +1212,10 @@
             const statusBadge = type === 'live'
                 ? '<span class="status-badge live">🔴 LIVE</span>'
                 : (match.status ? `<span class="status-badge">${match.status}</span>` : '');
+            let timeHtml = '';
+            if (match.time_ist || match.time_et) {
+                timeHtml = `<div class="match-time-card">⏰ 🇮🇳 ${match.time_ist || 'TBD'} &nbsp;|&nbsp; 🇺🇸 ${match.time_et || ''} / ${match.time_ct || ''} / ${match.time_pt || ''}</div>`;
+            }
 
             return `
                 <div class="${cardClass}">
@@ -1219,6 +1238,7 @@
                         <span>📅 ${formattedDate} ${isToday ? '(TODAY)' : ''}</span>
                         <span>🏟️ ${match.venue || 'TBD'}</span>
                     </div>
+                    ${timeHtml}
                 </div>
             `;
         }
@@ -1335,7 +1355,12 @@
                 return;
             }
 
-            container.innerHTML = matches.map(match => `
+            container.innerHTML = matches.map(match => {
+                let timeStr = '';
+                if (match.time_ist || match.time_et) {
+                    timeStr = `<div class="match-time">⏰ 🇮🇳 ${match.time_ist || ''} &nbsp;|&nbsp; 🇺🇸 ${match.time_et || ''} / ${match.time_ct || ''} / ${match.time_pt || ''}</div>`;
+                }
+                return `
                 <div class="match-card">
                     <div class="match-info">
                         <span class="match-number">M${match.match}</span>
@@ -1347,8 +1372,9 @@
                         <span>${match.away}</span>
                     </div>
                     <div class="match-venue">🏟️ ${match.venue}</div>
+                    ${timeStr}
                 </div>
-            `).join('');
+            `;}).join('');
         }
 
         function formatDate(dateStr) {
@@ -1513,6 +1539,10 @@
                     next = gs[gs.length - 1];
                 }
                 if (next) {
+                    let timeStr = '';
+                    if (next.time_ist || next.time_et) {
+                        timeStr = `<div class="match-time">⏰ 🇮🇳 ${next.time_ist || ''} &nbsp;|&nbsp; 🇺🇸 ${next.time_et || ''} / ${next.time_ct || ''} / ${next.time_pt || ''}</div>`;
+                    }
                     container.innerHTML = `
                         <div class="match-info">
                             <span class="match-number">M${next.match}</span>
@@ -1524,6 +1554,7 @@
                             <span>${next.away}</span>
                         </div>
                         <div class="match-venue">🏟️ ${next.venue}</div>
+                        ${timeStr}
                     `;
                 } else {
                     container.innerHTML = '<p style="color: var(--text-secondary);">No matches scheduled.</p>';
@@ -1613,9 +1644,10 @@
                         const dateObj = new Date(m.date + 'T00:00:00');
                         const dateStr = dateObj.toLocaleDateString('en-US', { month:'short', day:'numeric' });
                         const statusBadge = m.status && m.status !== 'null' ? `<span class="status-badge" style="font-size:0.65rem;">${m.status}</span>` : '';
+                        const matchTime = m.time_ist || m.time_et ? `<span style="font-size:0.7rem; color:var(--accent-gold);">⏰ ${m.time_ist || ''} | ${m.time_et || ''}</span>` : '';
                         return `
                             <div style="display:flex; align-items:center; justify-content:space-between; padding:0.5rem 0; border-bottom:1px solid var(--border-color);">
-                                <span style="font-size:0.8rem;">${dateStr}</span>
+                                <span style="font-size:0.8rem;">${dateStr} ${matchTime}</span>
                                 <span style="font-size:0.85rem;">${isHome ? '🏠' : '✈️'} vs <strong>${opponent}</strong></span>
                                 <span style="font-size:0.8rem;">${scoreHtml} ${statusBadge}</span>
                             </div>

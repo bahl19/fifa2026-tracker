@@ -227,19 +227,36 @@ def generate_chat_response(message):
         today_matches = upcoming.get('upcoming', [])
         today_matches = [m for m in today_matches if m.get('date') == today]
         
+        def _time_str(m):
+            """Format match time in IST + US zones"""
+            parts = []
+            if m.get('time_ist'):
+                parts.append(f"🇮🇳 {m['time_ist']}")
+            if m.get('time_et'):
+                parts.append(f"🇺🇸 {m['time_et']}")
+            if m.get('time_ct'):
+                parts.append(f"🇺🇸 {m['time_ct']}")
+            if m.get('time_pt'):
+                parts.append(f"🇺🇸 {m['time_pt']}")
+            if not parts and m.get('time_utc'):
+                parts.append(f"🌍 {m['time_utc']}")
+            return " | ".join(parts)
+
         if live:
             msg = "🔴 **LIVE NOW**\n\n"
             for m in live:
                 status = m.get('status', 'LIVE')
                 score = f"{m.get('home_score', 0)} : {m.get('away_score', 0)}" if m.get('home_score') is not None else "VS"
-                msg += f"⚽ {m['home']} **{score}** {m['away']}\n   🏟 {m.get('venue', '')} \\| {status}\n\n"
+                time_info = _time_str(m)
+                msg += f"⚽ {m['home']} **{score}** {m['away']}\n   🏟 {m.get('venue', '')} \\| {status}\n   ⏰ {time_info}\n\n"
             return msg
         elif today_matches:
             msg = f"🗓 **Today's Matches ({today})**\n\n"
             for m in today_matches:
                 is_live = '🔴 LIVE' if 'LIVE' in str(m.get('status', '')) else m.get('status', 'Scheduled')
                 score = f"{m.get('home_score')} : {m.get('away_score')}" if m.get('home_score') is not None else "VS"
-                msg += f"⚽ {m['home']} **{score}** {m['away']}\n   🏟 {m.get('venue', '')} \\| {is_live}\n\n"
+                time_info = _time_str(m)
+                msg += f"⚽ {m['home']} **{score}** {m['away']}\n   🏟 {m.get('venue', '')} \\| {is_live}\n   ⏰ {time_info}\n\n"
             return msg
         else:
             # Show next upcoming
@@ -251,7 +268,8 @@ def generate_chat_response(message):
                 msg = "⏰ **Next Matches**\n\n"
                 for m in msgs[:3]:
                     date_str = m['date']
-                    msg += f"📅 {date_str}: {m['home']} vs {m['away']} 🏟 {m.get('venue', 'TBD')}\n"
+                    time_info = _time_str(m)
+                    msg += f"📅 {date_str}: {m['home']} vs {m['away']}\n   ⏰ {time_info}\n   🏟 {m.get('venue', 'TBD')}\n\n"
                 return msg
             return "✅ No live or upcoming matches right now. Check the schedule tab for full fixtures."
     
@@ -300,7 +318,9 @@ def generate_chat_response(message):
                 date_str = m['date']
                 group = m.get('group', '')
                 venue = m.get('venue', 'TBD')
+                time_info = _time_str(m)
                 msg += f"📆 {date_str}: **{m['home']}** vs **{m['away']}**\n"
+                msg += f"   ⏰ {time_info}\n"
                 msg += f"   🏟 {venue} | {group}\n\n"
             
             # Also show today if there are today's matches
@@ -515,16 +535,17 @@ def send_goal_alert(match, scoring_team, side):
     away_s = match.get('away_score', 0) or 0
     group = match.get('group', '')
     venue = match.get('venue', '')
-    
+    time_str = f"\\n⏰ {match.get('time_et', '')} / {match.get('time_ist', '')}" if match.get('time_et') else ''
+
     text = (
         f"⚽🚨 *GOOOAL\\!* 🚨⚽\\n\\n"
         f"{home} *{home_s}* \\- *{away_s}* {away}\\n"
         f"🎯 *Scorer:* {scoring_team}\\n"
-        f"📍 {group}"
+        f"📍 {group}{time_str}"
     )
     if venue:
-        text += f" \\| 🏟 {venue}"
-    
+        text += f" \\\\| 🏟 {venue}"
+
     send_telegram_msg(text)
 
 
@@ -535,7 +556,8 @@ def send_final_alert(match):
     home_s = match.get('home_score', 0) or 0
     away_s = match.get('away_score', 0) or 0
     group = match.get('group', '')
-    
+    time_str = f"\\n⏰ {match.get('time_et', '')} / {match.get('time_ist', '')}" if match.get('time_et') else ''
+
     # Determine winner
     if home_s > away_s:
         result = f"🏆 {home} wins\\!"
@@ -543,14 +565,14 @@ def send_final_alert(match):
         result = f"🏆 {away} wins\\!"
     else:
         result = "🤝 Draw"
-    
+
     text = (
         f"🏁 *FULL TIME* 🏁\\n\\n"
         f"{home} *{home_s}* \\- *{away_s}* {away}\\n"
         f"{result}\\n"
-        f"📍 {group}"
+        f"📍 {group}{time_str}"
     )
-    
+
     send_telegram_msg(text)
 
 

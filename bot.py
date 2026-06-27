@@ -145,20 +145,22 @@ def cmd_today():
             msg = f"📅 *Next Matches*\\n\\n"
             for m in upcoming[:5]:
                 date_str = m['date']
+                time_str = f" ⏰ {m.get('time_et', '')} / {m.get('time_ist', '')}" if m.get('time_et') else ''
                 msg += f"📆 *{escape_md(date_str)}*\\n"
                 msg += f"  {escape_md(m['home'])} vs {escape_md(m['away'])}\\n"
-                msg += f"  🏟 {escape_md(m.get('venue', 'TBD'))}\\n\\n"
+                msg += f"  🏟 {escape_md(m.get('venue', 'TBD'))}{time_str}\\n\\n"
             return msg
         else:
             return "📅 No matches scheduled today\\."
-    
+
     msg = f"🗓 *Today's Matches ({escape_md(today_str)})*\\n\\n"
     for m in today_matches:
         status = "🔴 LIVE" if 'LIVE' in str(m.get('status', '')) else m.get('status', 'Scheduled')
         score = f" *{m['home_score']} : {m['away_score']}*" if m.get('home_score') is not None else " VS "
+        time_str = f" ⏰ {m.get('time_et', '')} / {m.get('time_ist', '')}" if m.get('time_et') else ''
         msg += f"⚽ {escape_md(m['home'])} {score} {escape_md(m['away'])}\\n"
-        msg += f"  🏟 {escape_md(m.get('venue', 'TBD'))} \\| {escape_md(status)}\\n\\n"
-    
+        msg += f"  🏟 {escape_md(m.get('venue', 'TBD'))} \\| {escape_md(status)}{time_str}\\n\\n"
+
     return msg
 
 
@@ -182,7 +184,8 @@ def cmd_schedule():
         if matches:
             msg += f"\\n*{escape_md(label)}* ({len(matches)} matches)\\n"
             for m in matches[:3]:
-                msg += f"  {escape_md(m['date'])}: {escape_md(m['home'])} vs {escape_md(m['away'])}\\n"
+                time_str = f" ({m.get('time_et', '')})" if m.get('time_et') else ''
+                msg += f"  {escape_md(m['date'])}: {escape_md(m['home'])} vs {escape_md(m['away'])}{time_str}\\n"
             if len(matches) > 3:
                 msg += f"  \\.\\.\\. and {len(matches)-3} more\\n"
     
