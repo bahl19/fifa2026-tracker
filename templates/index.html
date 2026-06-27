@@ -438,6 +438,144 @@
             text-align: right;
         }
 
+        /* Standings Tab - Match Cards */
+        .standings-section-header {
+            font-size: 1.15rem;
+            font-weight: 700;
+            margin-bottom: 1rem;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .match-cards {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
+            gap: 1rem;
+        }
+
+        .match-card-top {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 0.6rem;
+        }
+
+        .match-group-badge {
+            background: rgba(59, 130, 246, 0.15);
+            color: var(--accent-blue);
+            padding: 0.2rem 0.6rem;
+            border-radius: 8px;
+            font-size: 0.7rem;
+            font-weight: 600;
+            text-transform: uppercase;
+        }
+
+        .status-badge {
+            background: rgba(148, 163, 184, 0.15);
+            color: var(--text-secondary);
+            padding: 0.2rem 0.6rem;
+            border-radius: 8px;
+            font-size: 0.7rem;
+            font-weight: 600;
+        }
+
+        .status-badge.live {
+            background: rgba(239, 68, 68, 0.15);
+            color: var(--accent-red);
+            animation: pulse-bg 2s infinite;
+        }
+
+        .match-card-teams {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 1rem;
+            margin-bottom: 0.75rem;
+        }
+
+        .match-team {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            flex: 1;
+        }
+
+        .match-team:first-child {
+            justify-content: flex-end;
+        }
+
+        .match-team:last-child {
+            justify-content: flex-start;
+        }
+
+        .flag {
+            font-size: 1.5rem;
+        }
+
+        .team-name-sm {
+            font-weight: 600;
+            font-size: 0.95rem;
+        }
+
+        .match-score {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            font-weight: 800;
+            font-size: 1.3rem;
+        }
+
+        .score-divider {
+            color: var(--text-secondary);
+            opacity: 0.5;
+        }
+
+        .match-vs {
+            color: var(--accent-gold);
+            font-size: 1rem;
+            font-weight: 800;
+            text-transform: uppercase;
+        }
+
+        .match-card-bottom {
+            display: flex;
+            justify-content: space-between;
+            font-size: 0.75rem;
+            color: var(--text-secondary);
+            border-top: 1px solid var(--border-color);
+            padding-top: 0.5rem;
+        }
+
+        .match-card.live-card {
+            border-color: rgba(239, 68, 68, 0.4);
+            background: linear-gradient(135deg, rgba(239, 68, 68, 0.08), var(--bg-card));
+        }
+
+        .match-card.today-card {
+            border-color: rgba(245, 158, 11, 0.4);
+            background: linear-gradient(135deg, rgba(245, 158, 11, 0.08), var(--bg-card));
+        }
+
+        @keyframes pulse-live {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.4; }
+        }
+
+        @keyframes pulse-bg {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.6; }
+        }
+
+        .pulse-live {
+            display: inline-block;
+            width: 8px;
+            height: 8px;
+            background: var(--accent-red);
+            border-radius: 50%;
+            animation: pulse-live 1.5s infinite;
+        }
+
         /* Leaderboard */
         .leaderboard-grid {
             display: grid;
@@ -831,12 +969,17 @@
 
         <!-- Standings Section -->
         <div id="standings" class="section">
-            <h2 style="margin-bottom: 1.5rem; font-size: 1.5rem; font-weight: 800;">📊 Group Standings</h2>
-            <div id="groups-container" class="groups-grid">
-                <p style="color: var(--text-secondary); grid-column: 1/-1; text-align: center; padding: 2rem;">
-                    <span class="loading" style="display: inline-block; width: 20px; height: 20px; border-width: 3px;"></span>
-                    Loading standings...
-                </p>
+            <h2 style="margin-bottom: 1.5rem; font-size: 1.5rem; font-weight: 800;">📊 World Cup Tracker</h2>
+            <div id="standings-live" style="margin-bottom: 2rem;"></div>
+            <div id="standings-upcoming" style="margin-bottom: 2rem;"></div>
+            <div id="standings-groups">
+                <h3 style="color: var(--text-secondary); font-size: 1.1rem; margin-bottom: 1rem;">🏳️ Group Tables (Completed Matches)</h3>
+                <div id="groups-container" class="groups-grid">
+                    <p style="color: var(--text-secondary); grid-column: 1/-1; text-align: center; padding: 2rem;">
+                        <span class="loading" style="display: inline-block; width: 20px; height: 20px; border-width: 3px;"></span>
+                        Loading standings...
+                    </p>
+                </div>
             </div>
         </div>
 
@@ -844,7 +987,7 @@
         <div id="schedule" class="section">
             <h2 style="margin-bottom: 1.5rem; font-size: 1.5rem; font-weight: 800;">📅 Match Schedule</h2>
             <div class="schedule-nav" id="schedule-nav">
-                <button class="round-btn active" data-round="round_of_64">Group Stage</button>
+                <button class="round-btn active" data-round="group_stage">Group Stage</button>
                 <button class="round-btn" data-round="round_of_32">Round of 32</button>
                 <button class="round-btn" data-round="round_of_16">Round of 16</button>
                 <button class="round-btn" data-round="quarter_finals">Quarter Finals</button>
@@ -936,26 +1079,136 @@
 
         // Load Standings
         async function loadStandings() {
-            const container = document.getElementById('groups-container');
-            container.innerHTML = '<p style="color: var(--text-secondary); grid-column: 1/-1; text-align: center; padding: 2rem;"><span class="loading" style="display: inline-block; width: 20px; height: 20px; border-width: 3px;"></span> Loading standings...</p>';
+            const liveContainer = document.getElementById('standings-live');
+            const upcomingContainer = document.getElementById('standings-upcoming');
+            const groupsContainer = document.getElementById('groups-container');
+
+            liveContainer.innerHTML = '<p style="color: var(--text-secondary);"><span class="loading" style="display: inline-block; width: 20px; height: 20px; border-width: 3px;"></span></p>';
+            upcomingContainer.innerHTML = '<p style="color: var(--text-secondary);"><span class="loading" style="display: inline-block; width: 20px; height: 20px; border-width: 3px;"></span></p>';
+            groupsContainer.innerHTML = '<p style="color: var(--text-secondary); grid-column: 1/-1; text-align: center;"><span class="loading" style="display: inline-block; width: 20px; height: 20px; border-width: 3px;"></span></p>';
 
             try {
                 const response = await fetch('/api/standings');
                 const data = await response.json();
+                const standings = data.standings || data.groups;
 
-                if (data.groups && Object.keys(data.groups).length > 0) {
-                    container.innerHTML = '';
-                    const sortedGroups = Object.keys(data.groups).sort();
+                // --- LIVE MATCHES ---
+                const liveMatches = data.live_matches || [];
+                if (liveMatches.length > 0) {
+                    let liveHtml = '<div class="standings-section-header"><span class="pulse-live"></span> 🔴 LIVE NOW</div><div class="match-cards">';
+                    liveMatches.forEach(m => {
+                        liveHtml += renderMatchCard(m, 'live');
+                    });
+                    liveHtml += '</div>';
+                    liveContainer.innerHTML = liveHtml;
+                } else {
+                    liveContainer.innerHTML = '';
+                }
+
+                // --- UPCOMING MATCHES ---
+                const upcomingMatches = data.upcoming_matches || [];
+                const today = data.today || '';
+                if (upcomingMatches.length > 0) {
+                    let upcomingHtml = `<div class="standings-section-header">⏰ Upcoming Matches <span style="font-size: 0.8rem; font-weight: 400; opacity: 0.7;">(Next ${upcomingMatches.length})</span></div><div class="match-cards">`;
+                    upcomingMatches.forEach(m => {
+                        upcomingHtml += renderMatchCard(m, 'upcoming');
+                    });
+                    upcomingHtml += '</div>';
+                    upcomingContainer.innerHTML = upcomingHtml;
+                } else {
+                    upcomingContainer.innerHTML = `<div class="standings-section-header">✅ No more upcoming matches</div>`;
+                }
+
+                // --- GROUP TABLES ---
+                if (standings && Object.keys(standings).length > 0) {
+                    groupsContainer.innerHTML = '';
+                    const sortedGroups = Object.keys(standings).sort();
                     sortedGroups.forEach(group => {
-                        const teams = data.groups[group];
-                        container.innerHTML += renderGroupTable(group, teams);
+                        const teams = standings[group];
+                        groupsContainer.innerHTML += renderGroupTable(group, teams);
                     });
                 } else {
-                    container.innerHTML = '<p style="color: var(--text-secondary); grid-column: 1/-1; text-align: center;">No standings data available yet.</p>';
+                    groupsContainer.innerHTML = '<p style="color: var(--text-secondary); grid-column: 1/-1; text-align: center; padding: 1rem;">📋 Group tables will populate after the first match is played.</p>';
                 }
             } catch (error) {
-                container.innerHTML = '<p style="color: var(--accent-red); grid-column: 1/-1; text-align: center;">Failed to load standings. Please try again.</p>';
+                liveContainer.innerHTML = '';
+                upcomingContainer.innerHTML = `<p style="color: var(--accent-red);">❌ Failed to load match data. Try refreshing in 30 seconds.</p>`;
+                groupsContainer.innerHTML = '';
             }
+        }
+
+        function renderMatchCard(match, type) {
+            const roundLabel = match.group || formatRound(match.round);
+            const dateObj = new Date(match.date + 'T00:00:00');
+            const formattedDate = dateObj.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
+            const today = new Date().toISOString().slice(0, 10);
+            const isToday = match.date === today;
+            const cardClass = type === 'live' ? 'match-card live-card' : (isToday ? 'match-card today-card' : 'match-card');
+            const scoreDisplay = (match.home_score !== null && match.home_score !== undefined)
+                ? `<div class="match-score"><span class="score-num">${match.home_score}</span><span class="score-divider">:</span><span class="score-num">${match.away_score}</span></div>`
+                : `<div class="match-vs">VS</div>`;
+            const statusBadge = type === 'live'
+                ? '<span class="status-badge live">🔴 LIVE</span>'
+                : (match.status ? `<span class="status-badge">${match.status}</span>` : '');
+
+            return `
+                <div class="${cardClass}">
+                    <div class="match-card-top">
+                        <span class="match-group-badge">${roundLabel}</span>
+                        ${statusBadge}
+                    </div>
+                    <div class="match-card-teams">
+                        <div class="match-team">
+                            <span class="flag">${getTeamFlag(match.home)}</span>
+                            <span class="team-name-sm">${match.home}</span>
+                        </div>
+                        ${scoreDisplay}
+                        <div class="match-team">
+                            <span class="flag">${getTeamFlag(match.away)}</span>
+                            <span class="team-name-sm">${match.away}</span>
+                        </div>
+                    </div>
+                    <div class="match-card-bottom">
+                        <span>📅 ${formattedDate} ${isToday ? '(TODAY)' : ''}</span>
+                        <span>🏟️ ${match.venue || 'TBD'}</span>
+                    </div>
+                </div>
+            `;
+        }
+
+        function formatRound(roundKey) {
+            const labels = {
+                'group_stage': 'Group Stage',
+                'round_of_32': 'Round of 32',
+                'round_of_16': 'Round of 16',
+                'quarter_finals': 'Quarter Final',
+                'semi_finals': 'Semi Final',
+                'final': 'Grand Final'
+            };
+            return labels[roundKey] || roundKey.replace(/_/g, ' ');
+        }
+
+        function getTeamFlag(teamName) {
+            const flags = {
+                'Argentina': '🇦🇷', 'Brazil': '🇧🇷', 'France': '🇫🇷', 'Germany': '🇩🇪',
+                'Spain': '🇪🇸', 'England': '🏴󠁧󠁢󠁥󠁮󠁧󠁿', 'Italy': '🇮🇹', 'Netherlands': '🇳🇱',
+                'Portugal': '🇵🇹', 'Belgium': '🇧🇪', 'Croatia': '🇭🇷', 'Uruguay': '🇺🇾',
+                'Colombia': '🇨🇴', 'Mexico': '🇲🇽', 'USA': '🇺🇸', 'Canada': '🇨🇦',
+                'Costa Rica': '🇨🇷', 'Saudi Arabia': '🇸🇦', 'Japan': '🇯🇵', 'South Korea': '🇰🇷',
+                'Australia': '🇦🇺', 'Serbia': '🇷🇸', 'Cameroon': '🇨🇲', 'Ghana': '🇬🇭',
+                'Iran': '🇮🇷', 'Poland': '🇵🇱', 'Denmark': '🇩🇰', 'Switzerland': '🇨🇭',
+                'Sweden': '🇸🇪', 'Senegal': '🇸🇳', 'Morocco': '🇲🇦', 'Tunisia': '🇹🇳',
+                'Egypt': '🇪🇬', 'Nigeria': '🇳🇬', 'Chile': '🇨🇱', 'Peru': '🇵🇪',
+                'Ecuador': '🇪🇨', 'Wales': '🏴󠁧󠁢󠁷󠁬󠁳󠁿', 'Scotland': '🏴󠁧󠁢󠁳󠁣󠁴󠁿',
+                'Türkiye': '🇹🇷', 'Qatar': '🇶🇦', 'Ivory Coast': '🇨🇮', 'Uzbekistan': '🇺🇿',
+                'Panama': '🇵🇦', 'South Africa': '🇿🇦', 'TBD': '❓', 'Norway': '🇳🇴',
+                'Paraguay': '🇵🇾', 'Haiti': '🇭🇹', 'Congo DR': '🇨🇩', 'Iraq': '🇮🇶',
+                'Cape Verde': '🇨🇻', 'New Zealand': '🇳🇿', 'Bosnia-Herz': '🇧🇦'
+            };
+            for (let [name, flag] of Object.entries(flags)) {
+                if (teamName.includes(name) || name.includes(teamName)) return flag;
+            }
+            return '⚽';
         }
 
         function renderGroupTable(group, teams) {
@@ -967,7 +1220,7 @@
                         <td><span class="pos-badge ${topClass}">${idx + 1}</span></td>
                         <td>
                             <div class="team-cell">
-                                <span>${team.team_flag.includes('(') ? '🏠' : '🏳️'}</span>
+                                <span>🏳️</span>
                                 ${team.team.replace(' (H)', '')}
                                 ${team.team.includes('(H)') ? '🏠' : ''}
                             </div>
@@ -1020,7 +1273,7 @@
             try {
                 const response = await fetch('/api/schedule');
                 scheduleData = await response.json();
-                renderMatches('round_of_64');
+                renderMatches('group_stage');
             } catch (error) {
                 container.innerHTML = '<p style="color: var(--accent-red); text-align: center;">Failed to load schedule.</p>';
             }
@@ -1197,7 +1450,7 @@
             try {
                 const response = await fetch('/api/schedule');
                 const data = await response.json();
-                const round64 = data.round_of_64 || data.round_of_32;
+                const round64 = data.group_stage || data.round_of_64 || data.round_of_32;
                 if (round64 && round64.length > 0) {
                     const next = round64[0];
                     container.innerHTML = `

@@ -1,138 +1,319 @@
-import requests
-from bs4 import BeautifulSoup
+"""
+FIFA 2026 World Cup Data Scraper
+Primary source: ESPN API (real-time, comprehensive)
+Fallback: Wikipedia API, then hardcoded data
+"""
+
+import urllib.request
 import json
+import re
+from collections import defaultdict
 from datetime import datetime, timezone
 
-def scrape_fifa2026_data():
-    """Scrape FIFA 2026 World Cup data from Wikipedia"""
+
+def fetch_espn_data():
+    """Fetch all FIFA 2026 World Cup data from ESPN API"""
+    headers = {"User-Agent": "Mozilla/5.0"}
     
-    # FIFA 2026 World Cup data
-    base_url = "https://en.wikipedia.org/wiki/2026_FIFA_World_Cup"
+    # Fetch events (matches) - cover full World Cup period
+    events_url = "https://site.api.espn.com/apis/site/v2/sports/soccer/fifa.world/scoreboard?dates=20260610-20260815"
+    req = urllib.request.Request(events_url, headers=headers)
+    resp = urllib.request.urlopen(req, timeout=30)
+    events_data = json.loads(resp.read().decode())
     
-    try:
-        response = requests.get(base_url, timeout=15)
-        response.raise_for_status()
-        soup = BeautifulSoup(response.text, 'html.parser')
+    # Fetch statistics (top scorers, assists)
+    stats_url = "https://site.api.espn.com/apis/site/v2/sports/soccer/fifa.world/statistics"
+    req2 = urllib.request.Request(stats_url, headers=headers)
+    resp2 = urllib.request.urlopen(req2, timeout=30)
+    stats_data = json.loads(resp2.read().decode())
+    
+    return events_data, stats_data
+
+
+def parse_standings_from_events(events_data):
+    """Parse group standings from match events"""
+    team_stats = defaultdict(lambda: {
+        'played': 0, 'wins': 0, 'draws': 0, 'losses': 0,
+        'gf': 0, 'ga': 0, 'pts': 0, 'group': ''
+    })
+    
+    events = events_data.get('events', [])
+    
+    for event in events:
+        competition = event.get('competitions', [{}])[0]
+        alt_note = competition.get('altGameNote', '')
         
-        data = {
-            'last_updated': datetime.now(timezone.utc).isoformat(),
-            'groups': {},
-            'matches': [],
-            'teams_ranking': []
+        # Only process group stage games
+        if 'FIFA World Cup' not in alt_note:
+            continue
+        
+        group_match = re.search(r'Group\s+(\w+)', alt_note)
+        group = group_match.group(1) if group_match else None
+        if not group:
+            continue
+            
+        # Only count completed matches
+        status = competition.get('status', {})
+        status_type = status.get('type', {}).get('id', '')
+        if status_type != '28':  # STATUS_FULL_TIME
+            continue
+        
+        competitors = competition.get('competitors', [])
+        scores = {}
+        for comp in competitors:
+            team = comp['team']['shortDisplayName']
+            home_away = comp.get('homeAway')
+            score = int(comp.get('score', 0) or 0)
+            scores[home_away] = {'team': team, 'score': score}
+        
+        home = scores.get('home', {})
+        away = scores.get('away', {})
+        home_team = home.get('team', '')
+        away_team = away.get('team', '')
+        home_score = home.get('score', 0)
+        away_score = away.get('score', 0)
+        
+        if not home_team or not away_team:
+            continue
+        
+        # Update home team
+        team_stats[(group, home_team)]['played'] += 1
+        team_stats[(group, home_team)]['gf'] += home_score
+        team_stats[(group, home_team)]['ga'] += away_score
+        team_stats[(group, home_team)]['group'] = group
+        
+        # Update away team
+        team_stats[(group, away_team)]['played'] += 1
+        team_stats[(group, away_team)]['gf'] += away_score
+        team_stats[(group, away_team)]['ga'] += home_score
+        team_stats[(group, away_team)]['group'] = group
+        
+        if home_score > away_score:
+            team_stats[(group, home_team)]['wins'] += 1
+            team_stats[(group, home_team)]['pts'] += 3
+            team_stats[(group, away_team)]['losses'] += 1
+        elif away_score > home_score:
+            team_stats[(group, away_team)]['wins'] += 1
+            team_stats[(group, away_team)]['pts'] += 3
+            team_stats[(group, home_team)]['losses'] += 1
+        else:
+            team_stats[(group, home_team)]['draws'] += 1
+            team_stats[(group, home_team)]['pts'] += 1
+            team_stats[(group, away_team)]['draws'] += 1
+            team_stats[(group, away_team)]['pts'] += 1
+    
+    # Organize by group and sort
+    groups = defaultdict(list)
+    for (group, team), stats in team_stats.items():
+        gd = stats['gf'] - stats['ga']
+        groups[group].append({
+            'pos': 0,
+            'team': team,
+            'pld': stats['played'],
+            'w': stats['wins'],
+            'd': stats['draws'],
+            'l': stats['losses'],
+            'gf': stats['gf'],
+            'ga': stats['ga'],
+            'gd': f"+{gd}" if gd > 0 else str(gd),
+            'pts': stats['pts'],
+        })
+    
+    # Sort each group by points, then goal difference
+    for group in groups:
+        groups[group].sort(key=lambda x: (-x['pts'], -int(x['gd'].replace('+', ''))))
+        for i, team in enumerate(groups[group]):
+            team['pos'] = i + 1
+    
+    return dict(groups)
+
+
+def parse_matches_from_events(events_data):
+    """Parse all matches from ESPN events data"""
+    matches_by_round = {}
+    events = events_data.get('events', [])
+    
+    for event in events:
+        competition = event.get('competitions', [{}])[0]
+        alt_note = competition.get('altGameNote', '')
+        
+        if 'FIFA World Cup' not in alt_note:
+            continue
+        
+        # Determine round from alt note
+        if 'Round of 16' in alt_note:
+            round_name = 'round_of_16'
+        elif 'Round of 32' in alt_note:
+            round_name = 'round_of_32'
+        elif 'Quarterfinal' in alt_note or 'Quarter-final' in alt_note:
+            round_name = 'quarter_finals'
+        elif 'Semifinal' in alt_note or 'Semi-final' in alt_note:
+            round_name = 'semi_finals'
+        elif 'Final' in alt_note or 'final' in alt_note:
+            round_name = 'final'
+        else:
+            round_name = 'group_stage'
+        
+        competitors = competition.get('competitors', [])
+        scores = {}
+        for comp in competitors:
+            team_name = comp['team']['shortDisplayName']
+            home_away = comp.get('homeAway')
+            score = int(comp.get('score', 0) or 0)
+            scores[home_away] = {'team': team_name, 'score': score}
+        
+        home = scores.get('home', {'team': 'TBD', 'score': None})
+        away = scores.get('away', {'team': 'TBD', 'score': None})
+        
+        status = competition.get('status', {})
+        status_info = status.get('type', {})
+        status_desc = status_info.get('detail', 'TBD')
+        is_completed = status_info.get('completed', False)
+        is_live = status_info.get('state') == 'in' and not is_completed
+        
+        venue = competition.get('venue', {})
+        venue_name = venue.get('fullName', 'TBD')
+        venue_city = venue.get('address', {}).get('city', '')
+        venue_country = venue.get('address', {}).get('country', '')
+        
+        match_data = {
+            'match': event['id'],
+            'date': event['date'][:10],
+            'home': home['team'],
+            'away': away['team'],
+            'home_score': home['score'] if is_completed else None,
+            'away_score': away['score'] if is_completed else None,
+            'status': "🔴 LIVE" if is_live else status_desc,
+            'venue': venue_name,
+            'venue_location': f"{venue_city}, {venue_country}".strip(', ') if venue_city else '',
+            'group': alt_note,
         }
         
-        # Parse group tables
-        tables = soup.find_all('table', {'class': 'wikitable'})
+        if round_name not in matches_by_round:
+            matches_by_round[round_name] = []
+        matches_by_round[round_name].append(match_data)
+    
+    # Sort matches within each round by date
+    for round_name in matches_by_round:
+        matches_by_round[round_name].sort(key=lambda x: (x['date'], x['home']))
+    
+    return matches_by_round
+
+
+def parse_top_scorers(stats_data):
+    """Parse top scorers and assisters from ESPN stats"""
+    scorers = []
+    assisters = []
+    
+    for stat_group in stats_data.get('stats', []):
+        category = stat_group.get('abbreviation', '')
+        leaders = stat_group.get('leaders', [])
         
-        group_labels = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 
-                        'I', 'J', 'K', 'L', 'M', 'N', 'O', 'P',
-                        'Q', 'R']
-        
-        group_idx = 0
-        for table in tables:
-            rows = table.find_all('tr')
-            if len(rows) < 2:
-                continue
-                
-            headers = [th.get_text(strip=True) for th in rows[0].find_all(['th', 'td'])]
+        for leader in leaders:
+            athlete = leader.get('athlete', {})
+            name = athlete.get('displayName', 'Unknown')
+            val = int(leader.get('value', 0))
+            team = athlete.get('team', {}).get('shortDisplayName', '')
             
-            if 'Team' in headers or 'Pos' in headers:
-                if group_idx < len(group_labels):
-                    group_name = group_labels[group_idx]
-                    teams = []
-                    
-                    for row in rows[2:]:  # Skip header rows
-                        cells = row.find_all(['td'])
-                        if len(cells) >= 6:
-                            cells = [c.get_text(strip=True) for c in cells]
-                            team_data = {
-                                'pos': cells[0],
-                                'team': cells[1].replace(' (H)', '').strip(),
-                                'team_flag': cells[1],
-                                'pld': cells[2] if len(cells) > 2 else '0',
-                                'w': cells[3] if len(cells) > 3 else '0',
-                                'd': cells[4] if len(cells) > 4 else '0',
-                                'l': cells[5] if len(cells) > 5 else '0',
-                                'gf': cells[6] if len(cells) > 6 else '0',
-                                'ga': cells[7] if len(cells) > 7 else '0',
-                                'gd': cells[8] if len(cells) > 8 else '0',
-                                'pts': cells[9] if len(cells) > 9 else '0',
-                            }
-                            teams.append(team_data)
-                    
-                    if teams:
-                        # Sort by points descending
-                        teams.sort(key=lambda x: int(x['pts']) if x['pts'].isdigit() else 0, reverse=True)
-                        data['groups'][group_name] = teams
-                        group_idx += 1
-                else:
-                    break
+            if category == 'G':
+                scorers.append({'player': name, 'team': team, 'goals': val})
+            elif category == 'A':
+                assisters.append({'player': name, 'team': team, 'assists': val})
+    
+    # Add ranks and combine
+    for i, s in enumerate(scorers):
+        s['rank'] = i + 1
+        # Find matching assists
+        for a in assisters:
+            if a['player'] == s['player']:
+                s['assists'] = a['assists']
+                break
+        else:
+            s['assists'] = 0
+    
+    return scorers
+
+
+def scrape_fifa2026_data():
+    """Main scraping function - tries ESPN API first, falls back to Wikipedia, then hardcoded"""
+    try:
+        events_data, stats_data = fetch_espn_data()
+        groups = parse_standings_from_events(events_data)
         
-        return data
-        
+        return {
+            'last_updated': datetime.now(timezone.utc).isoformat(),
+            'data_source': 'ESPN API (Live)',
+            'standings': groups,
+            'total_matches': len(events_data.get('events', [])),
+        }
     except Exception as e:
-        print(f"Scraping error: {e}")
+        print(f"ESPN API failed: {e}, falling back to Wikipedia")
+        return scrape_from_wikipedia()
+
+
+def scrape_from_wikipedia():
+    """Fallback: scrape from Wikipedia API"""
+    try:
+        url = "https://en.wikipedia.org/w/api.php?action=parse&page=2026_FIFA_World_Cup&prop=wikitext&format=json"
+        headers = {"User-Agent": "Mozilla/5.0"}
+        req = urllib.request.Request(url, headers=headers, timeout=15)
+        resp = urllib.request.urlopen(req)
+        data = json.loads(resp.read().decode())
+        return {
+            'last_updated': datetime.now(timezone.utc).isoformat(),
+            'data_source': 'Wikipedia (fallback)',
+            'standings': {},
+        }
+    except:
         return get_fallback_data()
 
 
 def get_match_schedule():
-    """Get match schedule for 2026 World Cup"""
+    """Parse full match schedule from ESPN or fallback"""
+    try:
+        events_data, _ = fetch_espn_data()
+        matches = parse_matches_from_events(events_data)
+        return matches
+    except:
+        return get_fallback_schedule()
+
+
+def get_upcoming_matches(limit=15):
+    """Get next upcoming matches sorted by date (today first, then future)"""
+    from datetime import date
+    today = date.today().isoformat()
+    
+    schedule = get_match_schedule()
+    upcoming = []
+    live = []
+    completed = []
+    
+    for round_name, matches in schedule.items():
+        for m in matches:
+            match_info = {**m, 'round': round_name}
+            if 'LIVE' in m.get('status', ''):
+                live.append(match_info)
+            elif m.get('status', '') in ('TBD', 'Scheduled', 'STATUS_SCHEDULED') or not m.get('home_score') and not m.get('away_score'):
+                if m['date'] >= today:
+                    upcoming.append(match_info)
+                else:
+                    completed.append(match_info)
+            else:
+                completed.append(match_info)
+    
+    # Sort upcoming by date ascending
+    upcoming.sort(key=lambda x: (x['date'], x.get('home', '')))
+    upcoming = upcoming[:limit]
+    
     return {
-        "round_of_64": [
-            {"match": 1, "date": "2026-06-11", "home": "Mexico", "away": "TBD", "venue": "Estadio Azteca"},
-            {"match": 2, "date": "2026-06-11", "home": "Spain", "away": "TBD", "venue": "Estadio Akron"},
-            {"match": 3, "date": "2026-06-12", "home": "Brazil", "away": "TBD", "venue": "Estadio Jalisco"},
-            {"match": 4, "date": "2026-06-12", "home": "Argentina", "away": "TBD", "venue": "Estadio Universitario"},
-            {"match": 5, "date": "2026-06-13", "home": "Germany", "away": "TBD", "venue": "Estadio BBVA"},
-            {"match": 6, "date": "2026-06-13", "home": "France", "away": "TBD", "venue": "Estadio Monterrey"},
-            {"match": 7, "date": "2026-06-14", "home": "England", "away": "TBD", "venue": "SoFi Stadium"},
-            {"match": 8, "date": "2026-06-14", "home": "Portugal", "away": "TBD", "venue": "MetLife Stadium"},
-            {"match": 9, "date": "2026-06-15", "home": "Netherlands", "away": "TBD", "venue": "Rose Bowl"},
-            {"match": 10, "date": "2026-06-15", "home": "Italy", "away": "TBD", "venue": "Hard Rock Stadium"},
-            {"match": 11, "date": "2026-06-16", "home": "Belgium", "away": "TBD", "venue": "TQL Stadium"},
-            {"match": 12, "date": "2026-06-16", "home": "Croatia", "away": "TBD", "venue": "Bank of America Stadium"},
-            {"match": 13, "date": "2026-06-17", "home": "Uruguay", "away": "TBD", "venue": "Levi's Stadium"},
-            {"match": 14, "date": "2026-06-17", "home": "Denmark", "away": "TBD", "venue": "NRG Stadium"},
-            {"match": 15, "date": "2026-06-18", "home": "Colombia", "away": "TBD", "venue": "Mercedes-Benz Stadium"},
-            {"match": 16, "date": "2026-06-18", "home": "Switzerland", "away": "TBD", "venue": "Allianz Arena (Munich) Mock"},
-        ],
-        "round_of_32": [
-            {"match": 17, "date": "2026-06-22", "home": "TBD", "away": "TBD", "venue": "SoFi Stadium"},
-            {"match": 18, "date": "2026-06-22", "home": "TBD", "away": "TBD", "venue": "Estadio Azteca"},
-            {"match": 19, "date": "2026-06-23", "home": "TBD", "away": "TBD", "venue": "MetLife Stadium"},
-            {"match": 20, "date": "2026-06-23", "home": "TBD", "away": "TBD", "venue": "TQL Stadium"},
-            {"match": 21, "date": "2026-06-24", "home": "TBD", "away": "TBD", "venue": "Rose Bowl"},
-            {"match": 22, "date": "2026-06-24", "home": "TBD", "away": "TBD", "venue": "Estadio BBVA"},
-            {"match": 23, "date": "2026-06-25", "home": "TBD", "away": "TBD", "venue": "Hard Rock Stadium"},
-            {"match": 24, "date": "2026-06-25", "home": "TBD", "away": "TBD", "venue": "Levi's Stadium"},
-        ],
-        "round_of_16": [
-            {"match": 25, "date": "2026-06-29", "home": "TBD", "away": "TBD", "venue": "SoFi Stadium"},
-            {"match": 26, "date": "2026-06-29", "home": "TBD", "away": "TBD", "venue": "Estadio Jalisco"},
-            {"match": 27, "date": "2026-06-30", "home": "TBD", "away": "TBD", "venue": "MetLife Stadium"},
-            {"match": 28, "date": "2026-06-30", "home": "TBD", "away": "TBD", "venue": "Estadio Azteca"},
-        ],
-        "quarter_finals": [
-            {"match": 29, "date": "2026-07-04", "home": "TBD", "away": "TBD", "venue": "SoFi Stadium"},
-            {"match": 30, "date": "2026-07-04", "home": "TBD", "away": "TBD", "venue": "MetLife Stadium"},
-            {"match": 31, "date": "2026-07-05", "home": "TBD", "away": "TBD", "venue": "Rose Bowl"},
-            {"match": 32, "date": "2026-07-05", "home": "TBD", "away": "TBD", "venue": "Estadio Azteca"},
-        ],
-        "semi_finals": [
-            {"match": 33, "date": "2026-07-11", "home": "TBD", "away": "TBD", "venue": "AT&T Stadium"},
-            {"match": 34, "date": "2026-07-11", "home": "TBD", "away": "TBD", "venue": "MetLife Stadium"},
-        ],
-        "third_place": [
-            {"match": 35, "date": "2026-07-18", "home": "TBD", "away": "TBD", "venue": "Hard Rock Stadium"},
-        ],
-        "final": [
-            {"match": 36, "date": "2026-07-19", "home": "TBD", "away": "TBD", "venue": "MetLife Stadium, New Jersey"},
-        ]
+        'live': live,
+        'upcoming': upcoming,
+        'today': today
     }
 
 
 def get_world_ranking():
-    """Get FIFA World Ranking (top teams from CONCACAF/World)"""
+    """Get FIFA World Rankings"""
     return [
         {"rank": 1, "team": "Argentina", "points": 1867, "trend": "up"},
         {"rank": 2, "team": "France", "points": 1863, "trend": "down"},
@@ -144,59 +325,52 @@ def get_world_ranking():
         {"rank": 8, "team": "Portugal", "points": 1725, "trend": "same"},
         {"rank": 9, "team": "Colombia", "points": 1717, "trend": "up"},
         {"rank": 10, "team": "Italy", "points": 1702, "trend": "down"},
-        {"rank": 11, "team": "Germany", "points": 1699, "trend": "up"},
-        {"rank": 12, "team": "Uruguay", "points": 1698, "trend": "same"},
-        {"rank": 13, "team": "Croatia", "points": 1693, "trend": "down"},
-        {"rank": 14, "team": "Japan", "points": 1685, "trend": "up"},
-        {"rank": 15, "team": "Mexico", "points": 1673, "trend": "same"},
     ]
 
 
 def get_top_scorers():
-    """Get top scorers"""
-    return [
-        {"rank": 1, "player": "Lionel Messi", "team": "Argentina", "goals": 13, "assists": 8},
-        {"rank": 2, "player": "Cristiano Ronaldo", "team": "Portugal", "goals": 11, "assists": 5},
-        {"rank": 3, "player": "Kylian Mbappé", "team": "France", "goals": 10, "assists": 4},
-        {"rank": 4, "player": "Robert Lewandowski", "team": "Poland", "goals": 9, "assists": 3},
-        {"rank": 5, "player": "Harry Kane", "team": "England", "goals": 8, "assists": 6},
-        {"rank": 6, "player": "Mohamed Salah", "team": "Egypt", "goals": 8, "assists": 4},
-        {"rank": 7, "player": "Neymar Jr", "team": "Brazil", "goals": 7, "assists": 7},
-        {"rank": 8, "player": "Lautaro Martinez", "team": "Argentina", "goals": 7, "assists": 2},
-        {"rank": 9, "player": "Erling Haaland", "team": "Northern Ireland", "goals": 6, "assists": 3},
-        {"rank": 10, "player": "Álvaro Morata", "team": "Spain", "goals": 6, "assists": 2},
-    ]
+    """Get top scorers and assisters from ESPN API"""
+    try:
+        _, stats_data = fetch_espn_data()
+        return parse_top_scorers(stats_data)
+    except:
+        return get_fallback_scorers()
 
 
 def get_fallback_data():
-    """Fallback data if scraping fails"""
+    """Fallback data"""
     return {
-        "last_updated": datetime.now(timezone.utc).isoformat(),
-        "groups": {
-            "A": [
-                {"pos": 1, "team": "Mexico", "pld": 0, "w": 0, "d": 0, "l": 0, "gf": 0, "ga": 0, "gd": 0, "pts": 0},
-                {"pos": 2, "team": "Canada", "pld": 0, "w": 0, "d": 0, "l": 0, "gf": 0, "ga": 0, "gd": 0, "pts": 0},
-                {"pos": 3, "team": "Costa Rica", "pld": 0, "w": 0, "d": 0, "l": 0, "gf": 0, "ga": 0, "gd": 0, "pts": 0},
-                {"pos": 4, "team": "USA", "pld": 0, "w": 0, "d": 0, "l": 0, "gf": 0, "ga": 0, "gd": 0, "pts": 0},
+        'last_updated': datetime.now(timezone.utc).isoformat(),
+        'data_source': 'fallback',
+        'standings': {
+            'A': [
+                {"pos": 1, "team": "Mexico", "pld": 0, "w": 0, "d": 0, "l": 0, "gf": 0, "ga": 0, "gd": "0", "pts": 0},
+                {"pos": 2, "team": "Canada", "pld": 0, "w": 0, "d": 0, "l": 0, "gf": 0, "ga": 0, "gd": "0", "pts": 0},
+                {"pos": 3, "team": "Costa Rica", "pld": 0, "w": 0, "d": 0, "l": 0, "gf": 0, "ga": 0, "gd": "0", "pts": 0},
+                {"pos": 4, "team": "USA", "pld": 0, "w": 0, "d": 0, "l": 0, "gf": 0, "ga": 0, "gd": "0", "pts": 0},
             ],
-            "B": [
-                {"pos": 1, "team": "Brazil", "pld": 0, "w": 0, "d": 0, "l": 0, "gf": 0, "ga": 0, "gd": 0, "pts": 0},
-                {"pos": 2, "team": "Switzerland", "pld": 0, "w": 0, "d": 0, "l": 0, "gf": 0, "ga": 0, "gd": 0, "pts": 0},
-                {"pos": 3, "team": "Serbia", "pd": 0, "w": 0, "d": 0, "l": 0, "gf": 0, "ga": 0, "gd": 0, "pts": 0},
-                {"pos": 4, "team": "Cameroon", "pld": 0, "w": 0, "d": 0, "l": 0, "gf": 0, "ga": 0, "gd": 0, "pts": 0},
-            ],
-            "C": [
-                {"pos": 1, "team": "Argentina", "pld": 0, "w": 0, "d": 0, "l": 0, "gf": 0, "ga": 0, "gd": 0, "pts": 0},
-                {"pos": 2, "team": "Netherlands", "pld": 0, "w": 0, "d": 0, "l": 0, "gf": 0, "ga": 0, "gd": 0, "pts": 0},
-                {"pos": 3, "team": "Saudi Arabia", "pld": 0, "w": 0, "d": 0, "l": 0, "gf": 0, "ga": 0, "gd": 0, "pts": 0},
-                {"pos": 4, "team": "Australia", "pld": 0, "w": 0, "d": 0, "l": 0, "gf": 0, "ga": 0, "gd": 0, "pts": 0},
-            ],
-            "D": [
-                {"pos": 1, "team": "Germany", "pld": 0, "w": 0, "d": 0, "l": 0, "gf": 0, "ga": 0, "gd": 0, "pts": 0},
-                {"pos": 2, "team": "France", "pld": 0, "w": 0, "d": 0, "l": 0, "gf": 0, "ga": 0, "gd": 0, "pts": 0},
-                {"pos": 3, "team": "Iceland", "pld": 0, "w": 0, "d": 0, "l": 0, "gf": 0, "ga": 0, "gd": 0, "pts": 0},
-                {"pos": 4, "team": "Iran", "pld": 0, "w": 0, "d": 0, "l": 0, "gf": 0, "ga": 0, "gd": 0, "pts": 0},
-            ],
-        },
-        "matches": []
+        }
     }
+
+
+def get_fallback_schedule():
+    """Fallback match schedule"""
+    return {
+        "group_stage": [
+            {"match": 1, "date": "2026-06-11", "home": "Mexico", "away": "TBD", "venue": "Estadio Azteca", "status": "TBD"},
+        ],
+        "round_of_32": [],
+        "round_of_16": [],
+        "quarter_finals": [],
+        "semi_finals": [],
+        "final": [],
+    }
+
+
+def get_fallback_scorers():
+    """Fallback top scorers"""
+    return [
+        {"rank": 1, "player": "Lionel Messi", "team": "Argentina", "goals": 5, "assists": 2},
+        {"rank": 2, "player": "Vinícius Júnior", "team": "Brazil", "goals": 4, "assists": 1},
+        {"rank": 3, "player": "Erling Haaland", "team": "Norway", "goals": 4, "assists": 0},
+    ]

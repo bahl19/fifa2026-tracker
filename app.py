@@ -1,18 +1,16 @@
 from flask import Flask, render_template, jsonify, request
-from flask_socketio import SocketIO, emit
 from markupsafe import escape
 import threading
 import time
 from scraper import (
     scrape_fifa2026_data, get_match_schedule, get_world_ranking,
-    get_top_scorers
+    get_top_scorers, get_upcoming_matches
 )
 import json
 import os
 
 app = Flask(__name__)
 app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'fifa2026-secret-key')
-socketio = SocketIO(app, cors_allowed_origins="*")
 
 # Cached data
 cached_data = {
@@ -31,36 +29,33 @@ TEAM_FLAGS = {
     'Colombia': '🇨🇴', 'USA': '🇺🇸', 'Mexico': '🇲🇽', 'Canada': '🇨🇦',
     'Costa Rica': '🇨🇷', 'Saudi Arabia': '🇸🇦', 'Japan': '🇯🇵', 'South Korea': '🇰🇷',
     'Australia': '🇦🇺', 'Serbia': '🇷🇸', 'Cameroon': '🇨🇲', 'Ghana': '🇬🇭',
-    'Iran': '🇮🇷', 'Poland': '🇵🇭', 'Denmark': '🇩🇰', 'Switzerland': '🇨🇭',
-    'Sweden': '🇸🇪', 'Senegal': '🇸🇪', 'Morocco': '🇲🇦', 'Tunisia': '🇹🇳',
-    'Egypt': '🇪🇬', 'Nigeria': '🇳🇬', 'Colombia': '🇨🇴', 'Chile': '🇨🇱',
-    'Peru': '🇵🇪', 'Ecuador': '🇪🇨', 'Wales': '🏴󠁧󠁢󠁷󠁬󠁳󠁿', 'Scotland': '🏴󠁧󠁢󠁳󠁣󠁴󠁿',
-    'Turkey': '🇹🇷', 'Romania': '🇷🇴', 'Hungary': '🇭🇺', 'Austria': '🇦🇹',
-    'Czech Republic': '🇨🇿', 'Ukraine': '🇺🇦', 'Greece': '🇬🇷', 'Norway': '🇳🇴',
-    'Finland': '🇫🇮', 'Iceland': '🇮🇸', 'TBD': '❓'
+    'Iran': '🇮🇷', 'Poland': '🇵🇱', 'Denmark': '🇩🇰', 'Switzerland': '🇨🇭',
+    'Sweden': '🇸🇪', 'Senegal': '🇸🇳', 'Morocco': '🇲🇦', 'Tunisia': '🇹🇳',
+    'Egypt': '🇪🇬', 'Nigeria': '🇳🇬', 'Chile': '🇨🇱', 'Peru': '🇵🇪',
+    'Ecuador': '🇪🇨', 'Wales': '🏴󠁧󠁢󠁷󠁬󠁳󠁿', 'Scotland': '🏴󠁧󠁢󠁳󠁣󠁴󠁿',
+    'Türkiye': '🇹🇷', 'Romania': '🇷🇴', 'Hungary': '🇭🇺', 'Austria': '🇦🇹',
+    'Czechia': '🇨🇿', 'Ukraine': '🇺🇦', 'Greece': '🇬🇷', 'Norway': '🇳🇴',
+    'Finland': '🇫🇮', 'Iceland': '🇮🇸', 'Haiti': '🇭🇹', 'Curaçao': '🇨🇼',
+    'Cape Verde': '🇨🇻', 'New Zealand': '🇳🇿', 'Bosnia-Herz': '🇧🇦', 'Qatar': '🇶🇦',
+    'Paraguay': '🇵🇾', 'Egypt': '🇪🇬', 'Ivory Coast': '🇨🇮', 'Jordan': '🇯🇴',
+    'Algeria': '🇩🇿', 'Congo DR': '🇨🇩', 'Uzbekistan': '🇺🇿', 'Panama': '🇵🇦',
+    'Iraq': '🇮🇶', 'South Africa': '🇿🇦', 'TBD': '❓'
 }
 
 PLAYER_DB = {
-    'lionel messi': {'team': 'Argentina', 'position': 'Forward', 'age': 38, 'world_cups': 5, 'goals': 13, 'assists': 8, 'bio': 'Considered the GOAT. Led Argentina to 2022 World Cup glory. Also won Copa America 2021 & 2024.'},
-    'cristiano ronaldo': {'team': 'Portugal', 'position': 'Forward', 'age': 40, 'world_cups': 6, 'goals': 11, 'assists': 5, 'bio': 'All-time international goal scoring record holder. Euro 2016 champion with Portugal.'},
-    'kylian mbappe': {'team': 'France', 'position': 'Forward', 'age': 26, 'world_cups': 2, 'goals': 10, 'assists': 4, 'bio': '2018 World Cup winner at just 19. Hat-trick in 2022 Final. One of the best young talents.'},
-    'neymar jr': {'team': 'Brazil', 'position': 'Forward', 'age': 33, 'world_cups': 3, 'goals': 7, 'assists': 7, 'bio': 'Brazil\'s all-time top scorer. known for flair and creativity. Playing his final World Cup.'},
-    'harry kane': {'team': 'England', 'position': 'Forward', 'age': 32, 'world_cups': 3, 'goals': 8, 'assists': 6, 'bio': 'England captain and all-time top scorer. Premier League Golden Boot winner.'},
-    'mohamed salah': {'team': 'Egypt', 'position': 'Forward', 'age': 33, 'world_cups': 2, 'goals': 8, 'assists': 4, 'bio': 'Egyptian King, Liverpool legend. African Cup of Nations winner.'},
-    'robert lewandowski': {'team': 'Poland', 'position': 'Forward', 'age': 36, 'world_cups': 3, 'goals': 9, 'assists': 3, 'bio': 'Poland\'s all-time top scorer. Former Barcelona & Bayern Munich star.'},
-    'lautaro martinez': {'team': 'Argentina', 'position': 'Forward', 'age': 28, 'world_cups': 2, 'goals': 7, 'assists': 2, 'bio': 'Inter Milan star. Key player for Argentina.'},
-    'erling haaland': {'team': 'Norway', 'position': 'Forward', 'age': 25, 'world_cups': 0, 'goals': 6, 'assists': 3, 'bio': 'Manchester City phenom. Norway failed to qualify but a generational talent.'},
-    'alvaro morata': {'team': 'Spain', 'position': 'Forward', 'age': 32, 'world_cups': 2, 'goals': 6, 'assists': 2, 'bio': 'Spain captain. Euro 2012 & 2024 winner.'},
-    'jude bellingham': {'team': 'England', 'position': 'Midfielder', 'age': 22, 'world_cups': 2, 'goals': 5, 'assists': 3, 'bio': 'Real Madrid star. One of the most exciting young midfielders in the world.'},
-    'kevin de bruyne': {'team': 'Belgium', 'position': 'Midfielder', 'age': 34, 'world_cups': 3, 'goals': 4, 'assists': 9, 'bio': 'Belgium\'s creative maestro. Manchester City legend.'},
-    'vinicius jr': {'team': 'Brazil', 'position': 'Forward', 'age': 25, 'world_cups': 1, 'goals': 5, 'assists': 4, 'bio': 'Real Madrid star. Explosive winger for Brazil.'},
-    'jamal musiala': {'team': 'Germany', 'position': 'Midfielder', 'age': 22, 'world_cups': 2, 'goals': 4, 'assists': 2, 'bio': 'Bayern Munich prodigy. One of Europe\'s brightest talents.'},
-    'phil foden': {'team': 'England', 'position': 'Midfielder', 'age': 25, 'world_cups': 2, 'goals': 4, 'assists': 3, 'bio': 'Manchester City wonderkid. Premier League Young Player of the Year.'},
-    'luca modric': {'team': 'Croatia', 'position': 'Midfielder', 'age': 39, 'world_cups': 5, 'goals': 3, 'assists': 5, 'bio': '2018 Ballon d\'Or winner. Real Madrid legend. Making his final World Cup appearance.'},
-    'yi mengi': {'team': 'Italy', 'position': 'Forward', 'age': 29, 'world_cups': 0, 'goals': 0, 'assists': 0, 'bio': 'Italy squad member. Euro 2020 winner looking for redemption.'},
-    'josh kennedy': {'team': 'Australia', 'position': 'Forward', 'age': 30, 'world_cups': 1, 'goals': 0, "assists": 0, 'bio': 'Leeds United striker representing Australia.'},
-    'takefusa kubo': {'team': 'Japan', 'position': 'Forward', 'age': 24, 'world_cups': 2, 'goals': 3, 'assists': 2, 'bio': 'Real Sociedad star. Japan\'s exciting winger.'},
-    'cho yu-gyoung': {'team': 'South Korea', 'position': 'Forward', 'age': 28, "world_cups": 2, "goals": 2, "assists": 1, "bio": "South Korea's captain and key forward."}
+    'lionel messi': {'team': 'Argentina', 'position': 'Forward', 'age': 39, 'world_cups': 6, 'goals': 5, 'assists': 2, 'bio': '2022 World Cup winner. Currently leading 2026 World Cup scoring charts with 5 goals. The GOAT defies age.'},
+    'cristiano ronaldo': {'team': 'Portugal', 'position': 'Forward', 'age': 41, 'world_cups': 6, 'goals': 2, 'assists': 1, 'bio': 'All-time international goal scoring record holder. Playing in his 6th World Cup for Portugal.'},
+    'kylian mbappe': {'team': 'France', 'position': 'Forward', 'age': 27, 'world_cups': 3, 'goals': 4, 'assists': 2, 'bio': '2018 World Cup winner. Hat-trick in 2022 Final. 4 goals in 2026 so far. France\'s talisman.'},
+    'vinicius jr': {'team': 'Brazil', 'position': 'Forward', 'age': 26, 'world_cups': 2, 'goals': 4, 'assists': 2, 'bio': 'Real Madrid star. Brazil\'s explosive winger leading their attack with 4 goals in 2026.'},
+    'erling haaland': {'team': 'Norway', 'position': 'Forward', 'age': 26, 'world_cups': 1, 'goals': 4, 'assists': 1, 'bio': 'Manchester City phenom. Norway qualified for first WC since 1998. Haaland scoring 4 goals.'},
+    'jude bellingham': {'team': 'England', 'position': 'Midfielder', 'age': 23, 'world_cups': 2, 'goals': 2, 'assists': 1, 'bio': 'Real Madrid star. One of the most exciting young midfielders. 2 goals in 2026.'},
+    'kevin de bruyne': {'team': 'Belgium', 'position': 'Midfielder', 'age': 35, 'world_cups': 3, 'goals': 2, 'assists': 3, 'bio': 'Belgium\'s creative maestro. Manchester City legend. 2 goals, 3 assists in 2026.'},
+    'matheus cunha': {'team': 'Brazil', 'position': 'Forward', 'age': 29, 'world_cups': 1, 'goals': 3, 'assists': 2, 'bio': 'Wolfsburg forward. Creative force for Brazil with 3 goals in 2026 World Cup.'},
+    'jonathan david': {'team': 'Canada', 'position': 'Forward', 'age': 36, 'world_cups': 2, 'goals': 3, 'assists': 1, 'bio': 'Lille striker. Belgium-born Canadian hero. 3 goals keeping Canada\'s hopes alive.'},
+    'ismael saibari': {'team': 'Morocco', 'position': 'Midfielder', 'age': 29, 'world_cups': 2, 'goals': 3, 'assists': 1, 'bio': 'PSG midfielder. Key figure for Morocco with 3 goals in 2026 World Cup.'},
+    'johann manzambi': {'team': 'Switzerland', 'position': 'Forward', 'age': 26, 'world_cups': 1, 'goals': 3, 'assists': 0, 'bio': 'St. Gallen forward. Switzerland\'s top scorer in their last two Group A matches runs.'},
+    'brian brobbey': {'team': 'Netherlands', 'position': 'Forward', 'age': 26, 'world_cups': 1, 'goals': 3, 'assists': 1, 'bio': 'Ajax homegrown talent. Oranje dynamic striker in the 2026 Group F.'},
+    'deniz undav': {'team': 'Germany', 'position': 'Midfielder', 'age': 29, 'world_cups': 1, 'goals': 3, 'assists': 2, 'bio': 'Belgian-born German attacking mid. Currently ranked 11 in Group I.'},
 }
 
 TEAM_INFO = {
@@ -70,16 +65,31 @@ TEAM_INFO = {
     'Germany': {'flag': '🇩🇪', 'confederation': 'UEFA', 'manager': 'Julian Nagelsmann', 'world_cups_won': 4, 'ranking': 11},
     'Spain': {'flag': '🇪🇸', 'confederation': 'UEFA', 'manager': 'Luis de la Fuente', 'world_cups_won': 1, 'ranking': 3},
     'England': {'flag': '🏴󠁧󠁢󠁥󠁮󠁧󠁿', 'confederation': 'UEFA', 'manager': 'Thomas Tuchel', 'world_cups_won': 1, 'ranking': 4},
-    'Italy': {'flag': '🇮🇹', 'confederation': 'UEFA', 'manager': 'Luciano Spalletti', 'world_cups_won': 4, 'ranking': 10},
     'Netherlands': {'flag': '🇳🇱', 'confederation': 'UEFA', 'manager': 'Ronald Koeman', 'world_cups_won': 0, 'ranking': 7},
     'Portugal': {'flag': '🇵🇹', 'confederation': 'UEFA', 'manager': 'Roberto Martínez', 'world_cups_won': 0, 'ranking': 8},
     'Belgium': {'flag': '🇧🇪', 'confederation': 'UEFA', 'manager': 'Rudi Garcia', 'world_cups_won': 0, 'ranking': 6},
-    'Croatia': {'flag': '🇭🇷', 'confederation': 'UEFA', 'manager': 'Zlatko Dalić', 'world_cups_won': 0, 'ranking': 13},
-    'Uruguay': {'flag': '🇺🇾', 'confederation': 'CONMEBOL', 'manager': 'Marcelo Bielsa', 'world_cups_won': 2, 'ranking': 12},
     'Colombia': {'flag': '🇨🇴', 'confederation': 'CONMEBOL', 'manager': 'Néstor Lorenzo', 'world_cups_won': 0, 'ranking': 9},
     'Mexico': {'flag': '🇲🇽', 'confederation': 'CONCACAF', 'manager': 'Javier Aguirre', 'world_cups_won': 0, 'ranking': 15},
     'USA': {'flag': '🇺🇸', 'confederation': 'CONCACAF', 'manager': 'Mauricio Pochettino', 'world_cups_won': 0, 'ranking': 14},
+    'Switzerland': {'flag': '🇨🇭', 'confederation': 'UEFA', 'manager': 'Murat Yakin', 'world_cups_won': 0, 'ranking': 17},
+    'Japan': {'flag': '🇯🇵', 'confederation': 'AFC', 'manager': 'Hajime Moriyasu', 'world_cups_won': 0, 'ranking': 16},
+    'Morocco': {'flag': '🇲🇦', 'confederation': 'CAF', 'manager': 'Walid Regragui', 'world_cups_won': 0, 'ranking': 14},
+    'Senegal': {'flag': '🇸🇳', 'confederation': 'CAF', 'manager': 'Pape Matar Cissé', 'world_cups_won': 0, 'ranking': 19},
+    'Norway': {'flag': '🇳🇴', 'confederation': 'UEFA', 'manager': 'Ståle Solbakken', 'world_cups_won': 0, 'ranking': 36},
+    'Türkiye': {'flag': '🇹🇷', 'confederation': 'UEFA', 'manager': 'Vincenzo Montella', 'world_cups_won': 0, 'ranking': 28},
+    'Egypt': {'flag': '🇪🇬', 'confederation': 'CAF', 'manager': 'Hassan Shehata', 'world_cups_won': 0, 'ranking': 35},
+    'Cape Verde': {'flag': '🇨🇻', 'confederation': 'CAF', 'manager': 'Bubista', 'world_cups_won': 0, 'ranking': 59},
+    'Uruguay': {'flag': '🇺🇾', 'confederation': 'CONMEBOL', 'manager': 'Marcelo Bielsa', 'world_cups_won': 2, 'ranking': 12},
     'Canada': {'flag': '🇨🇦', 'confederation': 'CONCACAF', 'manager': 'Jesse Marsch', 'world_cups_won': 0, 'ranking': 31},
+    'Costa Rica': {'flag': '🇨🇷', 'confederation': 'CONCACAF', 'manager': 'Gustavo Alfaro', 'world_cups_won': 0, 'ranking': 40},
+    'Saudi Arabia': {'flag': '🇸🇦', 'confederation': 'AFC', 'manager': 'Roberto Mancini', 'world_cups_won': 0, 'ranking': 49},
+    'Australia': {'flag': '🇦🇺', 'confederation': 'AFC', 'manager': 'Tony Popovic', 'world_cups_won': 0, 'ranking': 25},
+    'Scotland': {'flag': '🏴󠁧󠁢󠁳󠁣󠁴󠁿', 'confederation': 'UEFA', 'manager': 'Steve Clarke', 'world_cups_won': 0, 'ranking': 39},
+    'Ivory Coast': {'flag': '🇨🇮', 'confederation': 'CAF', 'manager': 'Emerse Fae', 'world_cups_won': 0, 'ranking': 37},
+    'Haiti': {'flag': '🇭🇹', 'confederation': 'CONCACAF', 'manager': 'Wilfried Jean-Baptiste', 'world_cups_won': 0, 'ranking': 90},
+    'Congo DR': {'flag': '🇨🇩', 'confederation': 'CAF', 'manager': 'Sébastien Desabre', 'world_cups_won': 0, 'ranking': 64},
+    'Iran': {'flag': '🇮🇷', 'confederation': 'AFC', 'manager': 'Amir Ghalenoei', 'world_cups_won': 0, 'ranking': 18},
+    'Egypt': {'flag': '🇪🇬', 'confederation': 'CAF', 'manager': 'Hassan Shehata', 'world_cups_won': 0, 'ranking': 35},
     'TBD': {'flag': '❓', 'confederation': '-', 'manager': '-', 'world_cups_won': 0, 'ranking': '-'},
 }
 
@@ -117,7 +127,13 @@ def index():
 def api_standings():
     if not cached_data['standings']:
         update_data()
-    return jsonify(cached_data['standings'])
+    # Include upcoming matches in standings response
+    upcoming = get_upcoming_matches(limit=15)
+    standings = dict(cached_data['standings'])
+    standings['upcoming_matches'] = upcoming['upcoming']
+    standings['live_matches'] = upcoming['live']
+    standings['today'] = upcoming['today']
+    return jsonify(standings)
 
 
 @app.route('/api/schedule')
@@ -264,4 +280,4 @@ scraper_thread.start()
 
 
 if __name__ == '__main__':
-    socketio.run(app, host='0.0.0.0', port=int(os.environ.get('PORT', 5000)))
+    app.run(host='0.0.0.0', port=int(os.environ.get('PORT', 5000)))
